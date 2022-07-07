@@ -42,11 +42,11 @@ using namespace gstnvinfer;
 using namespace nvdsinfer;
 
 float default_array[5][2] = {  
-            {30.2946f+8.0f, 51.6963f},
-            {65.5318f+8.0f, 51.5014f},
-            {48.0252f+8.0f, 71.7366f},
-            {33.5493f+8.0f, 92.3655f},
-            {62.7299f+8.0f, 92.2041f}
+            {38.2946f+8.0f, 51.6963f},
+            {73.5318f+8.0f, 51.5014f},
+            {56.0252f+8.0f, 71.7366f},
+            {41.5493f+8.0f, 92.3655f},
+            {70.7299f+8.0f, 92.2041f}
         };
 
 float detect[5][2]={0};
@@ -1286,7 +1286,9 @@ get_converted_buffer (GstNvInfer * nvinfer, NvBufSurface * src_surf,
      * the aspect ratio. */
     double hdest = dest_frame->width * src_height / (double) src_width;
     double wdest = dest_frame->height * src_width / (double) src_height;
+    //std::cout<<"infer id "<<nvinfer->unique_id<<std::endl;
     int pixel_size;
+    //std::cout<<"dest frame: "<<dest_frame->width<<"  "<<dest_frame->height<<std::endl;
     cudaError_t cudaReturn;
 
     if (hdest <= dest_frame->height) {
@@ -1296,7 +1298,7 @@ get_converted_buffer (GstNvInfer * nvinfer, NvBufSurface * src_surf,
       dest_width = wdest;
       dest_height = dest_frame->height;
     }
-
+    ///std::cout<<"final dest size: "<<dest_width<<"  "<<dest_height<<std::endl;
     switch (dest_frame->colorFormat) {
       case NVBUF_COLOR_FORMAT_RGBA:
         pixel_size = 4;
@@ -1401,7 +1403,7 @@ get_converted_buffer (GstNvInfer * nvinfer, NvBufSurface * src_surf,
    */
   ratio_x = (double) dest_width / src_width;
   ratio_y = (double) dest_height / src_height;
-  //std::cout<<"ratio_x"<<ratio_x<<"  ratio_y"<<ratio_y<<std::endl;
+  //std::cout<<"r_x:"<<ratio_x<<" r_y:"<<ratio_y<<std::endl;
 
   /* Create temporary src and dest surfaces for NvBufSurfTransform API. */
   nvinfer->tmp_surf.surfaceList[nvinfer->tmp_surf.numFilled] = *src_frame;
@@ -1412,8 +1414,10 @@ get_converted_buffer (GstNvInfer * nvinfer, NvBufSurface * src_surf,
   /* Set the dest ROI. Could be the entire destination frame or part of it to
    * maintain aspect ratio. */
   if (!nvinfer->symmetric_padding) {
+    //std::cout<<"src "<<src_top<<" "<<src_left<<" "<<src_width<<" "<<src_height<<std::endl;
+    //std::cout<<"dest "<<dest_width<<" "<<dest_height<<std::endl;
     nvinfer->transform_params.dst_rect[nvinfer->tmp_surf.numFilled] =
-        { 0, 0, dest_width, dest_height };
+        { 0, 0, dest_width , dest_height  };
   } else {
     nvinfer->transform_params.dst_rect[nvinfer->tmp_surf.numFilled] =
         { offset_top, offset_left, dest_width, dest_height };
@@ -1551,7 +1555,7 @@ should_trans_object(GstNvInfer * nvinfer)
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define CLIP(a, min, max) (MAX(MIN(a, max), min))
 #define CONF_THRESH 0.1
-#define VIS_THRESH 0.75
+#define VIS_THRESH 0.9
 #define NMS_THRESH 0.4
 static constexpr int LOCATIONS = 4;
 static constexpr int ANCHORS = 10;
@@ -1609,7 +1613,13 @@ void nms_and_adapt(std::vector<Detection>& det, std::vector<Detection>& res, flo
             }
         }
     }
-    std::cout<<"after nms:"<<det.size()<<std::endl;
+    //std::cout<<"after nms:"<<det.size()<<std::endl;
+    for (unsigned int m = 0; m < res.size(); ++m) {
+        res[m].bbox[0] = CLIP(res[m].bbox[0]-50, 0, width - 1);
+        res[m].bbox[1] = CLIP(res[m].bbox[1]-50 , 0, height -1);
+        res[m].bbox[2] = CLIP(res[m].bbox[2]+50, 0, width - 1);
+        res[m].bbox[3] = CLIP(res[m].bbox[3]+50, 0, height - 1);
+    }
 
 }
 
@@ -1646,16 +1656,18 @@ tensor_postprocess(NvDsObjectMeta *object_meta){
         if(r.score<=VIS_THRESH) continue;
         float x_ratio = (r.bbox[2]-r.bbox[0]);
         float y_ratio = (r.bbox[3]-r.bbox[1]);
-        std::cout<<"ratio "<<x_ratio<<"  "<<y_ratio<<std::endl;
-        std::cout<<"bbox "<<r.bbox[0]<<" "<<r.bbox[1]<<" "<<r.bbox[2]<<" "<<r.bbox[3]<<std::endl;
+        //std::cout<<"ratio "<<x_ratio<<"  "<<y_ratio<<std::endl;
+        //std::cout<<"bbox "<<r.bbox[0]<<" "<<r.bbox[1]<<" "<<r.bbox[2]<<" "<<r.bbox[3]<<std::endl;
+        //std::cout<<"lmks: ";
         for(uint i=0;i<5;i++){
           
-          std::cout<<r.anchor[i*2 ]<<" "<<r.anchor[i*2+1]<<" ";
+          
           detect[i][0]=(r.anchor[i*2]-r.bbox[0])/x_ratio*112;
           detect[i][1]=(r.anchor[i*2 + 1]-r.bbox[1])/y_ratio*112;
+          //std::cout<<r.anchor[i*2 ]<<" "<<r.anchor[i*2+1]<<" ";
           
         }
-        std::cout<<std::endl;
+        //std::cout<<std::endl;
       }   
       return true;       
     }
@@ -1669,8 +1681,6 @@ tensor_postprocess(NvDsObjectMeta *object_meta){
 
 static void
 align_preprocess(NvBufSurface * surface, cv::Mat &M){
-
-  std::cout<<"surf   "<<surface->numFilled<<std::endl;
   for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
     gint frame_width = (gint)surface->surfaceList[frameIndex].width;
     gint frame_height = (gint)surface->surfaceList[frameIndex].height;
@@ -1689,13 +1699,15 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M){
     auto end = std::chrono::system_clock::now();
     std::cout << "d to d time usage:"<<std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us" << std::endl;
     */
-
+   
     void *src_data = NULL;
     src_data = (char *)malloc(surface->surfaceList[frameIndex].dataSize);
     if (src_data == NULL) {
     g_print("Error: failed to malloc src_data \n");
     }
     auto start = std::chrono::system_clock::now();
+    //std::cout<<"original size:"<<surface->surfaceList[frameIndex].dataSize<<std::endl;
+    //std::cout<<"surface params "<<"w:"<<surface->surfaceList[frameIndex].width<<" h:"<<surface->surfaceList[frameIndex].height<<" p:"<<surface->surfaceList[frameIndex].pitch<<std::endl;
     cudaMemcpy((void *)src_data,
         (void *)surface->surfaceList[frameIndex].dataPtr,
         surface->surfaceList[frameIndex].dataSize,
@@ -1704,31 +1716,84 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M){
     //std::cout << "d to H time usage:"<<std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us" << std::endl;
     size_t frame_step = surface->surfaceList[frameIndex].pitch;
     cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC3, src_data, frame_step);
-    cv::Mat out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
-    cv::cvtColor(frame, out_mat, CV_RGB2BGR);
+    
+    std::cout<<"frame is isContinuous:"<<frame.isContinuous()<<std::endl;
+    //std::cout<<"step:"<<frame.step<<std::endl;
+    //std::cout<<"step 0:"<<frame.step[0]<<"  step 1:"<<frame.step[1]<<"  step_0:"<<frame.step1(0)<<" step_1:"<<frame.step1(1)<<std::endl;
+    //cv::Mat out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
+    //cv::cvtColor(frame, out_mat, CV_RGB2BGR);
     char yuv_name[100] = "";
     sprintf(yuv_name, "before_%d.png", count);
-    
-    cv::imwrite(yuv_name, out_mat);
+    cv::imwrite(yuv_name, frame);
 
 
     cv::Mat warpImg;
-    cv::warpPerspective(frame, warpImg, M, cv::Size(112, 112));
-    cv::Mat out_mat_2 = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
-    cv::cvtColor(warpImg, out_mat_2, CV_RGB2BGR);
-    //char yuv_name[100] = "";
-    sprintf(yuv_name, "after_%d.png", count);
-    count = count + 1;
-    cv::imwrite(yuv_name, out_mat_2);
+    cv::warpPerspective(frame, warpImg, M, cv::Size(112, 112),cv::INTER_LINEAR);
 
-    cudaMemcpy((void *)src_data,
-        (void *)surface->surfaceList[frameIndex].dataPtr,
-        surface->surfaceList[frameIndex].dataSize,
+    sprintf(yuv_name, "after_%d.png", count);
+
+    for (int i = 0; i < frame.rows; i++)
+    {
+        uchar *data = frame.ptr<uchar>(i);
+        uchar *data2 = warpImg.ptr<uchar>(i);
+        for (int j = 0; j < frame.cols * frame.channels(); j++)
+        {
+            data[j] = data2[j];
+            
+        }
+    }
+
+    cv::imwrite(yuv_name, frame);
+
+    size_t sizeInBytes = surface->surfaceList[frameIndex].pitch * 112;
+    // size_t sizeInBytes = warpImg.step[0]*warpImg.rows;
+
+    std::cout<<cudaMemcpyAsync((void *)surface->surfaceList[frameIndex].dataPtr,
+        frame.ptr(0),
+        sizeInBytes,
         cudaMemcpyHostToDevice);
+    std::cout<<std::endl;
+    
+    //std::cout<<"now size:"<<surface->surfaceList[frameIndex].dataSize<<std::endl;
+    std::cout<<"alignment finish."<<std::endl;
 
     
   }
 }
+
+static void
+check_trans(NvBufSurface * surface){
+  for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
+    gint frame_width = (gint)surface->surfaceList[frameIndex].width;
+    gint frame_height = (gint)surface->surfaceList[frameIndex].height;
+
+    if (frame_width != 112 || frame_height != 112) continue;
+
+    void *src_data = NULL;
+    src_data = (char *)malloc(surface->surfaceList[frameIndex].dataSize);
+    if (src_data == NULL) {
+    g_print("Error: failed to malloc src_data \n");
+    }
+    auto start = std::chrono::system_clock::now();
+    cudaMemcpyAsync((void *)src_data,
+        (void *)surface->surfaceList[frameIndex].dataPtr,
+        surface->surfaceList[frameIndex].dataSize,
+        cudaMemcpyDeviceToHost);
+    auto end = std::chrono::system_clock::now();
+    //std::cout << "d to H time usage:"<<std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us" << std::endl;
+    size_t frame_step = surface->surfaceList[frameIndex].pitch;
+    cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC3, src_data, frame_step);
+    cv::Mat out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
+    //cv::cvtColor(frame, out_mat, CV_RGB2BGR);
+    char yuv_name[100] = "";
+    sprintf(yuv_name, "check_%d.png", count);  
+    count = count + 1;
+    cv::imwrite(yuv_name, frame);
+    //std::cout<<"check finish."<<std::endl;
+
+  }
+}
+
 
 static gboolean
 convert_batch_and_push_to_input_thread (GstNvInfer *nvinfer,
@@ -1827,22 +1892,23 @@ convert_batch_and_push_to_input_thread_2 (GstNvInfer *nvinfer,
   bool needs_trans = should_trans_object(nvinfer);
   if(nvinfer->user_meta != -1 && needs_trans > -1){
     
-    std::cout<<"*******"<<object_meta->parent->object_id<<"****"<<std::endl;
+    std::cout<<"*******"<<"Now trans object tracker id:"<<object_meta->parent->object_id<<"****"<<std::endl;
     if(tensor_postprocess(object_meta->parent)){
       cv::Mat src(5,2,CV_32FC1, default_array);
       memcpy(src.data, default_array, 2 * 5 * sizeof(float));
       cv::Mat dst(5,2,CV_32FC1, detect);
       memcpy(dst.data, detect, 2 * 5 * sizeof(float));
-      std::cout<<"detect="<<dst<<std::endl;
+      //std::cout<<"detect="<<dst<<std::endl;
       cv::Mat M = FacePreprocess::similarTransform(dst, src);
-      std::cout<<"M="<<std::endl<<" "<<M<<std::endl;
+      //std::cout<<"M="<<std::endl<<" "<<M<<std::endl;
       align_preprocess(mem->surf, M);
       memset(detect, 0, sizeof(detect));
+      check_trans(mem->surf);
       
     }
     
     
-    std::cout<<"======================="<<std::endl;
+    //std::cout<<"======================="<<std::endl;
   }
 
   
@@ -2248,7 +2314,8 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
         batch->conv_buf = conv_gst_buf;
       }
       idx = batch->frames.size ();
-
+      //std::cout<<"idx  "<<idx<<std::endl;
+      //std::cout<<"out:dest  "<<typeid(memory->surf).name()<<std::endl;
       /* Crop, scale and convert the buffer. */
       if (get_converted_buffer (nvinfer, in_surf,
               in_surf->surfaceList + frame_meta->batch_id,
