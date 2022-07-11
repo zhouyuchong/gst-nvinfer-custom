@@ -23,8 +23,6 @@
 #include <iostream>
 #include <cmath>
 #include <opencv2/opencv.hpp>
-//#include <opencv2/core/version.hpp>
-//#include <opencv2/cudaarithm.hpp>
 #include <opencv2/imgproc/types_c.h>
 
 #include "gst-nvevent.h"
@@ -179,6 +177,7 @@ namespace FacePreprocess {
     }
 }
 
+
 GST_DEBUG_CATEGORY (gst_nvinfer_debug);
 #define GST_CAT_DEFAULT gst_nvinfer_debug
 
@@ -240,7 +239,6 @@ static GQuark _dsmeta_quark = 0;
 #define DEFAULT_OUTPUT_INSTANCE_MASK FALSE
 #define DEFAULT_INPUT_TENSOR_META FALSE
 
-int count = 0;
 
 /* By default NVIDIA Hardware allocated memory flows through the pipeline. We
  * will be processing on this type of memory only. */
@@ -1551,8 +1549,8 @@ should_trans_object(GstNvInfer * nvinfer)
   return FALSE;
 }
 
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
-#define MAX(a, b) ((a) > (b) ? (a) : (b))
+//#define MIN(a, b) ((a) < (b) ? (a) : (b))
+//#define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define CLIP(a, min, max) (MAX(MIN(a, max), min))
 #define CONF_THRESH 0.1
 #define VIS_THRESH 0.9
@@ -1601,7 +1599,9 @@ float iou(float lbox[4], float rbox[4]) {
     return interBoxS/(lbox[2]*lbox[3] + rbox[2]*rbox[3] -interBoxS);
 }
 
-void nms_and_adapt(std::vector<Detection>& det, std::vector<Detection>& res, float nms_thresh, int width, int height) {
+
+static void 
+nms_and_adapt(std::vector<Detection>& det, std::vector<Detection>& res, float nms_thresh, int width, int height) {
     std::sort(det.begin(), det.end(), cmp);
     for (unsigned int m = 0; m < det.size(); ++m) {
         auto& item = det[m];
@@ -1613,7 +1613,6 @@ void nms_and_adapt(std::vector<Detection>& det, std::vector<Detection>& res, flo
             }
         }
     }
-    //std::cout<<"after nms:"<<det.size()<<std::endl;
     for (unsigned int m = 0; m < res.size(); ++m) {
         res[m].bbox[0] = CLIP(res[m].bbox[0]-50, 0, width - 1);
         res[m].bbox[1] = CLIP(res[m].bbox[1]-50 , 0, height -1);
@@ -1678,7 +1677,6 @@ tensor_postprocess(NvDsObjectMeta *object_meta){
 }
 
 
-
 static void
 align_preprocess(NvBufSurface * surface, cv::Mat &M){
   for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
@@ -1686,28 +1684,13 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M){
     gint frame_height = (gint)surface->surfaceList[frameIndex].height;
 
     if (frame_width != 112 || frame_height != 112) continue;
-
-    /*
-    void *temp_data = NULL;
-    cudaMalloc((void **)&temp_data, surface->surfaceList[frameIndex].dataSize);
-    
-    auto start = std::chrono::system_clock::now();
-    cudaMemcpy((void *)temp_data,
-      (void *)surface->surfaceList[frameIndex].dataPtr,
-      surface->surfaceList[frameIndex].dataSize,
-      cudaMemcpyDeviceToDevice);
-    auto end = std::chrono::system_clock::now();
-    std::cout << "d to d time usage:"<<std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us" << std::endl;
-    */
-   
+  
     void *src_data = NULL;
     src_data = (char *)malloc(surface->surfaceList[frameIndex].dataSize);
     if (src_data == NULL) {
-    g_print("Error: failed to malloc src_data \n");
+      g_print("Error: failed to malloc src_data \n");
     }
-    auto start = std::chrono::system_clock::now();
-    //std::cout<<"original size:"<<surface->surfaceList[frameIndex].dataSize<<std::endl;
-    //std::cout<<"surface params "<<"w:"<<surface->surfaceList[frameIndex].width<<" h:"<<surface->surfaceList[frameIndex].height<<" p:"<<surface->surfaceList[frameIndex].pitch<<std::endl;
+    //auto start = std::chrono::system_clock::now();
     cudaMemcpy((void *)src_data,
         (void *)surface->surfaceList[frameIndex].dataPtr,
         surface->surfaceList[frameIndex].dataSize,
@@ -1716,51 +1699,17 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M){
     //std::cout << "d to H time usage:"<<std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us" << std::endl;
     size_t frame_step = surface->surfaceList[frameIndex].pitch;
     cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC3, src_data, frame_step);
-    
-    std::cout<<"frame is isContinuous:"<<frame.isContinuous()<<std::endl;
-    //std::cout<<"step:"<<frame.step<<std::endl;
-    //std::cout<<"step 0:"<<frame.step[0]<<"  step 1:"<<frame.step[1]<<"  step_0:"<<frame.step1(0)<<" step_1:"<<frame.step1(1)<<std::endl;
-    //cv::Mat out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
-    //cv::cvtColor(frame, out_mat, CV_RGB2BGR);
-    char yuv_name[100] = "";
-    sprintf(yuv_name, "before_%d.png", count);
-    cv::imwrite(yuv_name, frame);
+    cv::warpPerspective(frame, frame, M, cv::Size(112, 112),cv::INTER_LINEAR);
 
-
-    cv::Mat warpImg;
-    cv::warpPerspective(frame, warpImg, M, cv::Size(112, 112),cv::INTER_LINEAR);
-
-    sprintf(yuv_name, "after_%d.png", count);
-
-    for (int i = 0; i < frame.rows; i++)
-    {
-        uchar *data = frame.ptr<uchar>(i);
-        uchar *data2 = warpImg.ptr<uchar>(i);
-        for (int j = 0; j < frame.cols * frame.channels(); j++)
-        {
-            data[j] = data2[j];
-            
-        }
-    }
-
-    cv::imwrite(yuv_name, frame);
-
-    size_t sizeInBytes = surface->surfaceList[frameIndex].pitch * 112;
-    // size_t sizeInBytes = warpImg.step[0]*warpImg.rows;
-
-    std::cout<<cudaMemcpyAsync((void *)surface->surfaceList[frameIndex].dataPtr,
+    size_t sizeInBytes = surface->surfaceList[frameIndex].dataSize;
+    cudaMemcpyAsync((void *)surface->surfaceList[frameIndex].dataPtr,
         frame.ptr(0),
         sizeInBytes,
-        cudaMemcpyHostToDevice);
-    std::cout<<std::endl;
-    
-    //std::cout<<"now size:"<<surface->surfaceList[frameIndex].dataSize<<std::endl;
-    std::cout<<"alignment finish."<<std::endl;
-
-    
+        cudaMemcpyHostToDevice);   
   }
 }
 
+int count =0;
 static void
 check_trans(NvBufSurface * surface){
   for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
@@ -1789,7 +1738,7 @@ check_trans(NvBufSurface * surface){
     sprintf(yuv_name, "check_%d.png", count);  
     count = count + 1;
     cv::imwrite(yuv_name, frame);
-    //std::cout<<"check finish."<<std::endl;
+    std::cout<<"check finish."<<std::endl;
 
   }
 }
