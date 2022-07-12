@@ -1645,7 +1645,7 @@ tensor_postprocess(NvDsObjectMeta *object_meta){
     std::vector<Detection> temp;
     std::vector<Detection> res;
     create_anchor_retinaface(temp, output, CONF_THRESH, NETWIDTH, NETHEIGHT);
-    nms_and_adapt(temp, res, NMS_THRESH, netwidth, netheight);
+    nms_and_adapt(temp, res, NMS_THRESH, NETWIDTH, NETHEIGHT);
     if(res.size()!=0){
       for(auto& r : res) {
         if(r.score<=VIS_THRESH) continue;
@@ -1729,7 +1729,7 @@ check_trans(NvBufSurface * surface){
     sprintf(yuv_name, "check_%d.png", count);  
     cv::imwrite(yuv_name, out_mat);
     count = count + 1;
-    std::cout<<"check finish."<<std::endl;
+    //std::cout<<"check finish."<<std::endl;
 
   }
 }
@@ -1760,12 +1760,22 @@ convert_batch_and_push_to_input_thread_face_alignment (GstNvInfer *nvinfer,
   eventAttrib.message.ascii = nvtx_str.c_str();
 
   nvtxDomainRangePushEx(nvinfer->nvtx_domain, &eventAttrib);
+  for (uint frameIndex = 0; frameIndex < mem->surf->numFilled; frameIndex++) {
+        gint frame_width = (gint) mem->surf->surfaceList[frameIndex].width;
+        gint frame_height = (gint) mem->surf->surfaceList[frameIndex].height;
+        //std::cout<<"stage 5:   frame width="<<frame_width<<"  height="<<frame_height<<std::endl;
+      }
 
   if (batch->frames.size() > 0) {
     /* Batched tranformation. */
     err = NvBufSurfTransformAsync (&nvinfer->tmp_surf, mem->surf,
               &nvinfer->transform_params, &batch->sync_obj);
   }
+  for (uint frameIndex = 0; frameIndex < mem->surf->numFilled; frameIndex++) {
+        gint frame_width = (gint) mem->surf->surfaceList[frameIndex].width;
+        gint frame_height = (gint) mem->surf->surfaceList[frameIndex].height;
+        //std::cout<<"stage 6:   frame width="<<frame_width<<"  height="<<frame_height<<std::endl;
+      }
 
   nvtxDomainRangePop (nvinfer->nvtx_domain);
 
@@ -1775,6 +1785,7 @@ convert_batch_and_push_to_input_thread_face_alignment (GstNvInfer *nvinfer,
         (NULL));
     return FALSE;
   }
+ 
  
   if(nvinfer->user_meta != -1 && nvinfer->alignment > -1){
     std::cout<<"******  "<<"Now do alignment on face of person-"<<object_meta->parent->object_id<<"  ******"<<std::endl;
@@ -2246,8 +2257,7 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
         batch->conv_buf = conv_gst_buf;
       }
       idx = batch->frames.size ();
-      //std::cout<<"idx  "<<idx<<std::endl;
-      //std::cout<<"out:dest  "<<typeid(memory->surf).name()<<std::endl;
+  
       /* Crop, scale and convert the buffer. */
       if (get_converted_buffer (nvinfer, in_surf,
               in_surf->surfaceList + frame_meta->batch_id,
@@ -2259,6 +2269,7 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
             ("Buffer conversion failed"), (NULL));
         return GST_FLOW_ERROR;
       }
+  
 
       /* Adding a frame to the current batch. Set the frames members. */
       GstNvInferFrame frame;
@@ -2276,6 +2287,7 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
           (nvinfer->classifier_async_mode) ? nullptr : (in_surf->surfaceList +
           frame_meta->batch_id);
       batch->frames.push_back (frame);
+
 
       /* Submit batch if the batch size has reached max_batch_size. */
       if (batch->frames.size () == nvinfer->max_batch_size) {
