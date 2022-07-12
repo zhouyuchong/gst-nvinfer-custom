@@ -39,6 +39,11 @@
 using namespace gstnvinfer;
 using namespace nvdsinfer;
 
+// ==========================ALIGN PREPROCESS=========================
+
+// ==========================     PART 1     =========================
+// default_array use the norm landmarks arcface_src from
+// https://github.com/deepinsight/insightface/blob/master/python-package/insightface/utils/face_align.py
 float default_array[5][2] = {  
             {38.2946f+8.0f, 51.6963f},
             {73.5318f+8.0f, 51.5014f},
@@ -49,7 +54,8 @@ float default_array[5][2] = {
 
 float detect[5][2]={0};
 
-
+// FacePreprocess defines some basic functions 
+// to generate the similar-transform matrix
 namespace FacePreprocess {
     cv::Mat meanAxis0(const cv::Mat &src)
     {
@@ -91,10 +97,8 @@ namespace FacePreprocess {
         return output;
     }
 
-
-    cv::Mat varAxis0(const cv::Mat &src)
-    {
-	cv::Mat temp_ = elementwiseMinus(src,meanAxis0(src));
+    cv::Mat varAxis0(const cv::Mat &src) {
+	      cv::Mat temp_ = elementwiseMinus(src,meanAxis0(src));
         cv::multiply(temp_ ,temp_ ,temp_ );
         return meanAxis0(temp_);
 
@@ -122,35 +126,31 @@ namespace FacePreprocess {
         d.setTo(1.0f);
         if (cv::determinant(A) < 0) {
             d.at<float>(dim - 1, 0) = -1;
-
         }
-	cv::Mat T = cv::Mat::eye(dim + 1, dim + 1, CV_32F);
+	      cv::Mat T = cv::Mat::eye(dim + 1, dim + 1, CV_32F);
         cv::Mat U, S, V;
-	cv::SVD::compute(A, S,U, V);
-
         // the SVD function in opencv differ from scipy .
-
-
+	      cv::SVD::compute(A, S,U, V);
+        
         int rank = MatrixRank(A);
         if (rank == 0) {
             assert(rank == 0);
-
         } else if (rank == dim - 1) {
             if (cv::determinant(U) * cv::determinant(V) > 0) {
                 T.rowRange(0, dim).colRange(0, dim) = U * V;
             } else {
-//            s = d[dim - 1]
-//            d[dim - 1] = -1
-//            T[:dim, :dim] = np.dot(U, np.dot(np.diag(d), V))
-//            d[dim - 1] = s
+                // s = d[dim - 1]
+                // d[dim - 1] = -1
+                // T[:dim, :dim] = np.dot(U, np.dot(np.diag(d), V))
+                // d[dim - 1] = s
                 int s = d.at<float>(dim - 1, 0) = -1;
                 d.at<float>(dim - 1, 0) = -1;
 
                 T.rowRange(0, dim).colRange(0, dim) = U * V;
                 cv::Mat diag_ = cv::Mat::diag(d);
                 cv::Mat twp = diag_*V; //np.dot(np.diag(d), V.T)
-		cv::Mat B = cv::Mat::zeros(3, 3, CV_8UC1);
-		cv::Mat C = B.diag(0);
+		            cv::Mat B = cv::Mat::zeros(3, 3, CV_8UC1);
+		            cv::Mat C = B.diag(0);
                 T.rowRange(0, dim).colRange(0, dim) = U* twp;
                 d.at<float>(dim - 1, 0) = s;
             }
@@ -176,6 +176,7 @@ namespace FacePreprocess {
         return T;
     }
 }
+// ====================================================================
 
 
 GST_DEBUG_CATEGORY (gst_nvinfer_debug);
@@ -1530,15 +1531,6 @@ queue_batch:
   return NULL;
 }
 
-static void 
-save_transformed_plate_images(NvBufSurface * surface) {
-  for (uint frameIndex = 0; frameIndex < surface->numFilled;
-      frameIndex++) {
-    std::cout<<(gint)surface->surfaceList[frameIndex].width<<std::endl;
-  }
-  return;
-}
-
 static inline gboolean
 should_trans_object(GstNvInfer * nvinfer)
 {
@@ -1549,14 +1541,18 @@ should_trans_object(GstNvInfer * nvinfer)
   return FALSE;
 }
 
-//#define MIN(a, b) ((a) < (b) ? (a) : (b))
-//#define MAX(a, b) ((a) > (b) ? (a) : (b))
+// ==========================     PART 2     =========================
+
 #define CLIP(a, min, max) (MAX(MIN(a, max), min))
 #define CONF_THRESH 0.1
 #define VIS_THRESH 0.9
 #define NMS_THRESH 0.4
+#define NETWIDTH 640
+#define NETHEIGHT 640
 static constexpr int LOCATIONS = 4;
 static constexpr int ANCHORS = 10;
+int count = 0; // use to name check pic files
+
 
 struct alignas(float) Detection{
     float bbox[LOCATIONS];
@@ -1564,7 +1560,9 @@ struct alignas(float) Detection{
     float anchor[ANCHORS];
 };
 
-void create_anchor_retinaface(std::vector<Detection>& res, float *output, float conf_thresh, int width, int height) {
+/* decode the output data layer of trt engine into struct detection*/
+static void 
+create_anchor_retinaface(std::vector<Detection>& res, float *output, float conf_thresh, int width, int height) {
     int det_size = sizeof(Detection) / sizeof(float);
     for (int i = 0; i < output[0]; i++){
         if (output[1 + det_size * i + 4] <= conf_thresh) continue;
@@ -1599,7 +1597,7 @@ float iou(float lbox[4], float rbox[4]) {
     return interBoxS/(lbox[2]*lbox[3] + rbox[2]*rbox[3] -interBoxS);
 }
 
-
+/* NMS and trans locations into valid format*/
 static void 
 nms_and_adapt(std::vector<Detection>& det, std::vector<Detection>& res, float nms_thresh, int width, int height) {
     std::sort(det.begin(), det.end(), cmp);
@@ -1613,6 +1611,8 @@ nms_and_adapt(std::vector<Detection>& det, std::vector<Detection>& res, float nm
             }
         }
     }
+    // crop larger area for better alignment performance 
+    // there I choose to crop 50 more pixel 
     for (unsigned int m = 0; m < res.size(); ++m) {
         res[m].bbox[0] = CLIP(res[m].bbox[0]-50, 0, width - 1);
         res[m].bbox[1] = CLIP(res[m].bbox[1]-50 , 0, height -1);
@@ -1622,7 +1622,7 @@ nms_and_adapt(std::vector<Detection>& det, std::vector<Detection>& res, float nm
 
 }
 
-
+/* get user-meta and decode them to get facial landmarks*/
 static bool
 tensor_postprocess(NvDsObjectMeta *object_meta){
   static guint use_device_mem = 0;
@@ -1635,38 +1635,27 @@ tensor_postprocess(NvDsObjectMeta *object_meta){
     NvDsInferTensorMeta *meta = (NvDsInferTensorMeta *) user_meta->user_meta_data;
     NvDsInferLayerInfo *info = &meta->output_layers_info[0];
     info->buffer = meta->out_buf_ptrs_host[0];
-    //std::cout<<"dims:"<<info->inferDims<<std::endl;
-    //std::cout<<"numele:"<<info->inferDims.numElements<<std::endl;
     if (use_device_mem && meta->out_buf_ptrs_dev[0]) {
+      // get all data from gpu to cpu
       cudaMemcpy (meta->out_buf_ptrs_host[0], meta->out_buf_ptrs_dev[0],
           info->inferDims.numElements * 4, cudaMemcpyDeviceToHost);
     }
     std::vector < NvDsInferLayerInfo > outputLayersInfo (meta->output_layers_info, meta->output_layers_info + meta->num_output_layers);
     float *output = (float*)(outputLayersInfo[0].buffer);
-    //std::cout<<output[0]<<std::endl;
     std::vector<Detection> temp;
     std::vector<Detection> res;
-    int netwidth = 640;
-    int netheight = 640;
-    create_anchor_retinaface(temp, output, CONF_THRESH, netwidth, netheight);
+    create_anchor_retinaface(temp, output, CONF_THRESH, NETWIDTH, NETHEIGHT);
     nms_and_adapt(temp, res, NMS_THRESH, netwidth, netheight);
     if(res.size()!=0){
       for(auto& r : res) {
         if(r.score<=VIS_THRESH) continue;
-        float x_ratio = (r.bbox[2]-r.bbox[0]);
-        float y_ratio = (r.bbox[3]-r.bbox[1]);
-        //std::cout<<"ratio "<<x_ratio<<"  "<<y_ratio<<std::endl;
-        //std::cout<<"bbox "<<r.bbox[0]<<" "<<r.bbox[1]<<" "<<r.bbox[2]<<" "<<r.bbox[3]<<std::endl;
-        //std::cout<<"lmks: ";
-        for(uint i=0;i<5;i++){
-          
-          
-          detect[i][0]=(r.anchor[i*2]-r.bbox[0])/x_ratio*112;
-          detect[i][1]=(r.anchor[i*2 + 1]-r.bbox[1])/y_ratio*112;
-          //std::cout<<r.anchor[i*2 ]<<" "<<r.anchor[i*2+1]<<" ";
-          
+        float x_width = (r.bbox[2]-r.bbox[0]);
+        float y_height = (r.bbox[3]-r.bbox[1]);
+        for(uint i=0;i<5;i++) {
+          //calculate the correct ratio to trans landmarks
+          detect[i][0]=(r.anchor[i*2]-r.bbox[0])/x_width*112;
+          detect[i][1]=(r.anchor[i*2 + 1]-r.bbox[1])/y_height*112;
         }
-        //std::cout<<std::endl;
       }   
       return true;       
     }
@@ -1676,13 +1665,15 @@ tensor_postprocess(NvDsObjectMeta *object_meta){
   }  
 }
 
-
+/* use similarTransform matrix to do warp perspective trans */
+// TODO:to crop a picture larger than 112 * 112 
 static void
 align_preprocess(NvBufSurface * surface, cv::Mat &M){
   for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
     gint frame_width = (gint)surface->surfaceList[frameIndex].width;
     gint frame_height = (gint)surface->surfaceList[frameIndex].height;
 
+    // ugly codes here, don't have a good solution yet.
     if (frame_width != 112 || frame_height != 112) continue;
   
     void *src_data = NULL;
@@ -1695,7 +1686,7 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M){
         (void *)surface->surfaceList[frameIndex].dataPtr,
         surface->surfaceList[frameIndex].dataSize,
         cudaMemcpyDeviceToHost);
-    auto end = std::chrono::system_clock::now();
+    //auto end = std::chrono::system_clock::now();
     //std::cout << "d to H time usage:"<<std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us" << std::endl;
     size_t frame_step = surface->surfaceList[frameIndex].pitch;
     cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC3, src_data, frame_step);
@@ -1709,7 +1700,7 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M){
   }
 }
 
-int count =0;
+/* save cropped image to check trans successfully or not */
 static void
 check_trans(NvBufSurface * surface){
   for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
@@ -1723,26 +1714,91 @@ check_trans(NvBufSurface * surface){
     if (src_data == NULL) {
     g_print("Error: failed to malloc src_data \n");
     }
-    auto start = std::chrono::system_clock::now();
+    //auto start = std::chrono::system_clock::now();
     cudaMemcpyAsync((void *)src_data,
         (void *)surface->surfaceList[frameIndex].dataPtr,
         surface->surfaceList[frameIndex].dataSize,
         cudaMemcpyDeviceToHost);
-    auto end = std::chrono::system_clock::now();
+    //auto end = std::chrono::system_clock::now();
     //std::cout << "d to H time usage:"<<std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us" << std::endl;
     size_t frame_step = surface->surfaceList[frameIndex].pitch;
     cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC3, src_data, frame_step);
     cv::Mat out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
-    //cv::cvtColor(frame, out_mat, CV_RGB2BGR);
+    cv::cvtColor(frame, out_mat, CV_RGB2BGR);
     char yuv_name[100] = "";
     sprintf(yuv_name, "check_%d.png", count);  
+    cv::imwrite(yuv_name, out_mat);
     count = count + 1;
-    cv::imwrite(yuv_name, frame);
     std::cout<<"check finish."<<std::endl;
 
   }
 }
 
+static gboolean
+convert_batch_and_push_to_input_thread_face_alignment (GstNvInfer *nvinfer,
+    GstNvInferBatch *batch, GstNvInferMemory *mem, NvDsFrameMeta *frame_meta, NvDsObjectMeta *object_meta)
+{
+  NvBufSurfTransform_Error err = NvBufSurfTransformError_Success;
+  std::string nvtx_str;
+
+  /* Set the transform session parameters for the conversions executed in this
+   * thread. */
+  err = NvBufSurfTransformSetSessionParams (&nvinfer->transform_config_params);
+  if (err != NvBufSurfTransformError_Success) {
+    GST_ELEMENT_ERROR (nvinfer, STREAM, FAILED,
+        ("NvBufSurfTransformSetSessionParams failed with error %d", err), (NULL));
+    return FALSE;
+  }
+
+  nvtxEventAttributes_t eventAttrib = {0};
+  eventAttrib.version = NVTX_VERSION;
+  eventAttrib.size = NVTX_EVENT_ATTRIB_STRUCT_SIZE;
+  eventAttrib.colorType = NVTX_COLOR_ARGB;
+  eventAttrib.color = 0xFFFF0000;
+  eventAttrib.messageType = NVTX_MESSAGE_TYPE_ASCII;
+  nvtx_str = "convert_buf batch_num=" + std::to_string(nvinfer->current_batch_num);
+  eventAttrib.message.ascii = nvtx_str.c_str();
+
+  nvtxDomainRangePushEx(nvinfer->nvtx_domain, &eventAttrib);
+
+  if (batch->frames.size() > 0) {
+    /* Batched tranformation. */
+    err = NvBufSurfTransformAsync (&nvinfer->tmp_surf, mem->surf,
+              &nvinfer->transform_params, &batch->sync_obj);
+  }
+
+  nvtxDomainRangePop (nvinfer->nvtx_domain);
+
+  if (err != NvBufSurfTransformError_Success) {
+    GST_ELEMENT_ERROR (nvinfer, STREAM, FAILED,
+        ("NvBufSurfTransform failed with error %d while converting buffer", err),
+        (NULL));
+    return FALSE;
+  }
+ 
+  if(nvinfer->user_meta != -1 && nvinfer->alignment > -1){
+    std::cout<<"******  "<<"Now do alignment on face of person-"<<object_meta->parent->object_id<<"  ******"<<std::endl;
+    //tensor_postprocess will extract 5 landmarks from user-meta and store them in Mat detect
+    if(tensor_postprocess(object_meta->parent)){
+      cv::Mat src(5,2,CV_32FC1, default_array);
+      memcpy(src.data, default_array, 2 * 5 * sizeof(float));
+      cv::Mat dst(5,2,CV_32FC1, detect);
+      memcpy(dst.data, detect, 2 * 5 * sizeof(float));
+      cv::Mat M = FacePreprocess::similarTransform(dst, src);
+      align_preprocess(mem->surf, M);
+      memset(detect, 0, sizeof(detect));
+      //save mem->surf to check covering 
+      check_trans(mem->surf);
+    }
+  }
+  LockGMutex locker (nvinfer->process_lock);
+  /* Push the batch info structure in the processing queue and notify the output
+   * thread that a new batch has been queued. */
+  g_queue_push_tail (nvinfer->input_queue, batch);
+  g_cond_broadcast (&nvinfer->process_cond);
+  return TRUE;
+}
+//============================================================================================
 
 static gboolean
 convert_batch_and_push_to_input_thread (GstNvInfer *nvinfer,
@@ -1796,80 +1852,7 @@ convert_batch_and_push_to_input_thread (GstNvInfer *nvinfer,
 }
 
 
-static gboolean
-convert_batch_and_push_to_input_thread_2 (GstNvInfer *nvinfer,
-    GstNvInferBatch *batch, GstNvInferMemory *mem, NvDsFrameMeta *frame_meta, NvDsObjectMeta *object_meta)
-{
-  NvBufSurfTransform_Error err = NvBufSurfTransformError_Success;
-  std::string nvtx_str;
 
-  /* Set the transform session parameters for the conversions executed in this
-   * thread. */
-  err = NvBufSurfTransformSetSessionParams (&nvinfer->transform_config_params);
-  if (err != NvBufSurfTransformError_Success) {
-    GST_ELEMENT_ERROR (nvinfer, STREAM, FAILED,
-        ("NvBufSurfTransformSetSessionParams failed with error %d", err), (NULL));
-    return FALSE;
-  }
-
-  nvtxEventAttributes_t eventAttrib = {0};
-  eventAttrib.version = NVTX_VERSION;
-  eventAttrib.size = NVTX_EVENT_ATTRIB_STRUCT_SIZE;
-  eventAttrib.colorType = NVTX_COLOR_ARGB;
-  eventAttrib.color = 0xFFFF0000;
-  eventAttrib.messageType = NVTX_MESSAGE_TYPE_ASCII;
-  nvtx_str = "convert_buf batch_num=" + std::to_string(nvinfer->current_batch_num);
-  eventAttrib.message.ascii = nvtx_str.c_str();
-
-  nvtxDomainRangePushEx(nvinfer->nvtx_domain, &eventAttrib);
-
-  if (batch->frames.size() > 0) {
-    /* Batched tranformation. */
-    err = NvBufSurfTransformAsync (&nvinfer->tmp_surf, mem->surf,
-              &nvinfer->transform_params, &batch->sync_obj);
-  }
-
-  nvtxDomainRangePop (nvinfer->nvtx_domain);
-
-  if (err != NvBufSurfTransformError_Success) {
-    GST_ELEMENT_ERROR (nvinfer, STREAM, FAILED,
-        ("NvBufSurfTransform failed with error %d while converting buffer", err),
-        (NULL));
-    return FALSE;
-  }
- 
-  bool needs_trans = should_trans_object(nvinfer);
-  if(nvinfer->user_meta != -1 && needs_trans > -1){
-    
-    std::cout<<"*******"<<"Now trans object tracker id:"<<object_meta->parent->object_id<<"****"<<std::endl;
-    if(tensor_postprocess(object_meta->parent)){
-      cv::Mat src(5,2,CV_32FC1, default_array);
-      memcpy(src.data, default_array, 2 * 5 * sizeof(float));
-      cv::Mat dst(5,2,CV_32FC1, detect);
-      memcpy(dst.data, detect, 2 * 5 * sizeof(float));
-      //std::cout<<"detect="<<dst<<std::endl;
-      cv::Mat M = FacePreprocess::similarTransform(dst, src);
-      //std::cout<<"M="<<std::endl<<" "<<M<<std::endl;
-      align_preprocess(mem->surf, M);
-      memset(detect, 0, sizeof(detect));
-      check_trans(mem->surf);
-      
-    }
-    
-    
-    //std::cout<<"======================="<<std::endl;
-  }
-
-  
-  //std::cout<<"object  "<<nvinfer->input_queue<<std::endl;
-  LockGMutex locker (nvinfer->process_lock);
-  /* Push the batch info structure in the processing queue and notify the output
-   * thread that a new batch has been queued. */
-  g_queue_push_tail (nvinfer->input_queue, batch);
-  g_cond_broadcast (&nvinfer->process_cond);
-
-  return TRUE;
-}
 
 
 /* Process entire frames in the batched buffer. */
@@ -2296,7 +2279,7 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
 
       /* Submit batch if the batch size has reached max_batch_size. */
       if (batch->frames.size () == nvinfer->max_batch_size) {
-      if (!convert_batch_and_push_to_input_thread_2 (nvinfer, batch.get(), memory, frame_meta, object_meta)) {
+      if (!convert_batch_and_push_to_input_thread_face_alignment (nvinfer, batch.get(), memory, frame_meta, object_meta)) {
         return GST_FLOW_ERROR;
       }
       /* Batch submitted. Set batch to nullptr so that a new GstNvInferBatch
