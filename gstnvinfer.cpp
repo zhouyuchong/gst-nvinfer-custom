@@ -1297,7 +1297,7 @@ get_converted_buffer (GstNvInfer * nvinfer, NvBufSurface * src_surf,
       dest_width = wdest;
       dest_height = dest_frame->height;
     }
-    ///std::cout<<"final dest size: "<<dest_width<<"  "<<dest_height<<std::endl;
+    //std::cout<<"final dest size: "<<dest_width<<"  "<<dest_height<<std::endl;
     switch (dest_frame->colorFormat) {
       case NVBUF_COLOR_FORMAT_RGBA:
         pixel_size = 4;
@@ -1673,8 +1673,6 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M){
     gint frame_width = (gint)surface->surfaceList[frameIndex].width;
     gint frame_height = (gint)surface->surfaceList[frameIndex].height;
 
-    // ugly codes here, don't have a good solution yet.
-    if (frame_width != 112 || frame_height != 112) continue;
   
     void *src_data = NULL;
     src_data = (char *)malloc(surface->surfaceList[frameIndex].dataSize);
@@ -1702,12 +1700,10 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M){
 
 /* save cropped image to check trans successfully or not */
 static void
-check_trans(NvBufSurface * surface){
+check_trans(NvBufSurface * surface, int track_id){
   for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
     gint frame_width = (gint)surface->surfaceList[frameIndex].width;
     gint frame_height = (gint)surface->surfaceList[frameIndex].height;
-
-    if (frame_width != 112 || frame_height != 112) continue;
 
     void *src_data = NULL;
     src_data = (char *)malloc(surface->surfaceList[frameIndex].dataSize);
@@ -1726,11 +1722,8 @@ check_trans(NvBufSurface * surface){
     cv::Mat out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
     cv::cvtColor(frame, out_mat, CV_RGB2BGR);
     char yuv_name[100] = "";
-    sprintf(yuv_name, "check_%d.png", count);  
+    sprintf(yuv_name, "images/face-of-person-%d.png", track_id);  
     cv::imwrite(yuv_name, out_mat);
-    count = count + 1;
-    //std::cout<<"check finish."<<std::endl;
-
   }
 }
 
@@ -1799,7 +1792,7 @@ convert_batch_and_push_to_input_thread_face_alignment (GstNvInfer *nvinfer,
       align_preprocess(mem->surf, M);
       memset(detect, 0, sizeof(detect));
       //save mem->surf to check covering 
-      check_trans(mem->surf);
+      check_trans(mem->surf, object_meta->parent->object_id);
     }
   }
   LockGMutex locker (nvinfer->process_lock);
@@ -1809,6 +1802,178 @@ convert_batch_and_push_to_input_thread_face_alignment (GstNvInfer *nvinfer,
   g_cond_broadcast (&nvinfer->process_cond);
   return TRUE;
 }
+
+/**
+ * Calls the one of the required conversion functions based on the network
+ * input format.
+ */
+static GstFlowReturn
+get_converted_buffer_face_alignment (GstNvInfer * nvinfer, NvBufSurface * src_surf,
+    NvBufSurfaceParams * src_frame, NvOSD_RectParams * crop_rect_params,
+    NvBufSurface * dest_surf, NvBufSurfaceParams * dest_frame,
+    gdouble & ratio_x, gdouble & ratio_y, guint & offset_left,
+    guint & offset_top, void *destCudaPtr)
+{
+  guint src_left = GST_ROUND_UP_2 ((unsigned int)crop_rect_params->left);
+  guint src_top = GST_ROUND_UP_2 ((unsigned int)crop_rect_params->top);
+  guint src_width = GST_ROUND_DOWN_2 ((unsigned int)crop_rect_params->width);
+  guint src_height = GST_ROUND_DOWN_2 ((unsigned int)crop_rect_params->height);
+  guint dest_width, dest_height;
+
+  guint offset_right = 0, offset_bottom = 0;
+  offset_left = 0;
+  offset_top = 0;
+  if (nvinfer->maintain_aspect_ratio) {
+    
+    /* Calculate the destination width and height required to maintain
+     * the aspect ratio. */
+    double hdest = dest_frame->width * src_height / (double) src_width;
+    double wdest = dest_frame->height * src_width / (double) src_height;
+    //std::cout<<"infer id "<<nvinfer->unique_id<<std::endl;
+    int pixel_size;
+    //std::cout<<"dest frame: "<<dest_frame->width<<"  "<<dest_frame->height<<std::endl;
+    cudaError_t cudaReturn;
+
+    if (hdest <= dest_frame->height) {
+      dest_width = dest_frame->width;
+      dest_height = hdest;
+    } else {
+      dest_width = wdest;
+      dest_height = dest_frame->height;
+    }
+    //std::cout<<"final dest size: "<<dest_width<<"  "<<dest_height<<std::endl;
+   
+    switch (dest_frame->colorFormat) {
+      case NVBUF_COLOR_FORMAT_RGBA:
+        pixel_size = 4;
+        break;
+      case NVBUF_COLOR_FORMAT_RGB:
+        pixel_size = 3;
+        break;
+      case NVBUF_COLOR_FORMAT_GRAY8:
+      case NVBUF_COLOR_FORMAT_NV12:
+        pixel_size = 1;
+        break;
+      default:
+        g_assert_not_reached ();
+        break;
+    }
+    /* Pad the scaled image with black color. */
+    if (!nvinfer->symmetric_padding) {
+      /* Right-Bottom Padding. */
+      cudaReturn =
+          cudaMemset2DAsync ((uint8_t *) destCudaPtr + pixel_size * dest_width,
+          dest_frame->planeParams.pitch[0], 0,
+          pixel_size * (dest_frame->width - dest_width), dest_frame->height,
+          nvinfer->convertStream);
+      if (cudaReturn != cudaSuccess) {
+        GST_ERROR_OBJECT (nvinfer,
+            "cudaMemset2DAsync failed with error %s while converting buffer",
+            cudaGetErrorName (cudaReturn));
+        return GST_FLOW_ERROR;
+      }
+      cudaReturn =
+          cudaMemset2DAsync ((uint8_t *) destCudaPtr +
+          dest_frame->planeParams.pitch[0] * dest_height,
+          dest_frame->planeParams.pitch[0], 0, pixel_size * dest_width,
+          dest_frame->height - dest_height, nvinfer->convertStream);
+      if (cudaReturn != cudaSuccess) {
+        GST_ERROR_OBJECT (nvinfer,
+            "cudaMemset2DAsync failed with error %s while converting buffer",
+            cudaGetErrorName (cudaReturn));
+        return GST_FLOW_ERROR;
+      }
+    } else {
+      /* Symmetric Padding. */
+      offset_left = (dest_frame->width - dest_width) / 2;
+      offset_right = dest_frame->width - dest_width - offset_left;
+
+      cudaReturn =
+          cudaMemset2DAsync ((uint8_t *) destCudaPtr,
+          dest_frame->planeParams.pitch[0], 0,
+          pixel_size * offset_left, dest_frame->height, nvinfer->convertStream);
+      if (cudaReturn != cudaSuccess) {
+        GST_ERROR_OBJECT (nvinfer,
+            "cudaMemset2DAsync failed with error %s while converting buffer",
+            cudaGetErrorName (cudaReturn));
+        return GST_FLOW_ERROR;
+      }
+
+      cudaReturn =
+          cudaMemset2DAsync ((uint8_t *) destCudaPtr + pixel_size *
+          (dest_width + offset_left),
+          dest_frame->planeParams.pitch[0], 0,
+          pixel_size * offset_right, dest_frame->height,
+          nvinfer->convertStream);
+      if (cudaReturn != cudaSuccess) {
+        GST_ERROR_OBJECT (nvinfer,
+            "cudaMemset2DAsync failed with error %s while converting buffer",
+            cudaGetErrorName (cudaReturn));
+        return GST_FLOW_ERROR;
+      }
+
+      offset_top = (dest_frame->height - dest_height) / 2;
+      offset_bottom = dest_frame->height - dest_height - offset_top;
+
+      cudaReturn =
+          cudaMemset2DAsync ((uint8_t *) destCudaPtr,
+          dest_frame->planeParams.pitch[0], 0, pixel_size * dest_width,
+          offset_top, nvinfer->convertStream);
+      if (cudaReturn != cudaSuccess) {
+        GST_ERROR_OBJECT (nvinfer,
+            "cudaMemset2DAsync failed with error %s while converting buffer",
+            cudaGetErrorName (cudaReturn));
+        return GST_FLOW_ERROR;
+      }
+
+      cudaReturn =
+          cudaMemset2DAsync ((uint8_t *) destCudaPtr +
+          dest_frame->planeParams.pitch[0] * (dest_height + offset_top),
+          dest_frame->planeParams.pitch[0], 0, pixel_size * dest_width,
+          offset_bottom, nvinfer->convertStream);
+      if (cudaReturn != cudaSuccess) {
+        GST_ERROR_OBJECT (nvinfer,
+            "cudaMemset2DAsync failed with error %s while converting buffer",
+            cudaGetErrorName (cudaReturn));
+        return GST_FLOW_ERROR;
+      }
+    }
+  } else {
+    dest_width = nvinfer->network_width;
+    dest_height = nvinfer->network_height;
+  }
+  /* Calculate the scaling ratio of the frame / object crop. This will be
+   * required later for rescaling the detector output boxes to input resolution.
+   */
+  ratio_x = (double) dest_width / src_width;
+  ratio_y = (double) dest_height / src_height;
+  //std::cout<<"r_x:"<<ratio_x<<" r_y:"<<ratio_y<<std::endl;
+
+  /* Create temporary src and dest surfaces for NvBufSurfTransform API. */
+  nvinfer->tmp_surf.surfaceList[nvinfer->tmp_surf.numFilled] = *src_frame;
+
+  /* Set the source ROI. Could be entire frame or an object. */
+  nvinfer->transform_params.src_rect[nvinfer->tmp_surf.numFilled] =
+      { src_top, src_left, src_width, src_height };
+  /* Set the dest ROI. Could be the entire destination frame or part of it to
+   * maintain aspect ratio. */
+  if (!nvinfer->symmetric_padding) {
+    //std::cout<<"src "<<src_top<<" "<<src_left<<" "<<src_width<<" "<<src_height<<std::endl;
+    //std::cout<<"dest "<<dest_width<<" "<<dest_height<<std::endl;
+    nvinfer->transform_params.dst_rect[nvinfer->tmp_surf.numFilled] =
+        { 0, 0, dest_width , dest_height  };
+  } else {
+    nvinfer->transform_params.dst_rect[nvinfer->tmp_surf.numFilled] =
+        { offset_top, offset_left, dest_width, dest_height };
+  }
+
+  nvinfer->tmp_surf.numFilled++;
+  nvinfer->tmp_surf.memType = src_surf->memType;
+
+  return GST_FLOW_OK;
+}
+
+
 //============================================================================================
 
 static gboolean
@@ -2259,7 +2424,7 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
       idx = batch->frames.size ();
   
       /* Crop, scale and convert the buffer. */
-      if (get_converted_buffer (nvinfer, in_surf,
+      if (get_converted_buffer_face_alignment (nvinfer, in_surf,
               in_surf->surfaceList + frame_meta->batch_id,
               &object_meta->rect_params, memory->surf,
               memory->surf->surfaceList + idx, scale_ratio_x, scale_ratio_y,
