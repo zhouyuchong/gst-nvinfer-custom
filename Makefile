@@ -15,7 +15,7 @@ endif
 
 CXX:= g++
 SRCS:= gstnvinfer.cpp  gstnvinfer_allocator.cpp gstnvinfer_property_parser.cpp \
-       gstnvinfer_meta_utils.cpp gstnvinfer_impl.cpp gstnvinfer_yaml_parser.cpp
+       gstnvinfer_meta_utils.cpp gstnvinfer_impl.cpp gstnvinfer_yaml_parser.cpp align_functions.cpp
 INCS:= $(wildcard *.h)
 LIB:=libnvdsgst_infer.so
 
@@ -23,9 +23,9 @@ NVDS_VERSION:=6.1
 
 CFLAGS+= -fPIC -std=c++11 -DDS_VERSION=\"6.1.0\" \
 	 -I /usr/local/cuda-$(CUDA_VER)/include \
-	 -I ../../includes \
-	 -I ../gst-nvdspreprocess/include \
-	 -I ../../libs/nvdsinfer -DNDEBUG
+	 -I /opt/nvidia/deepstream/deepstream-6.1/sources/includes \
+	 -I /opt/nvidia/deepstream/deepstream-6.1/sources/gst-plugins/gst-nvdspreprocess/include \
+	 -I /opt/nvidia/deepstream/deepstream-6.1/sources/libs/nvdsinfer -DNDEBUG
 
 -D_GLIBCXX_USE_CXX11_ABI=0
 CFLAGS+=-I /usr/include/opencv4 

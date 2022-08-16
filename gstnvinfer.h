@@ -29,6 +29,7 @@
 #include "gstnvdsmeta.h"
 
 #include "nvtx3/nvToolsExt.h"
+#include "align_functions.h"
 
 /* Package and library details required for plugin_init */
 #define PACKAGE "nvinfer"
@@ -328,6 +329,8 @@ struct _GstNvInfer
   nvtxDomainHandle_t nvtx_domain;
 
   GstNvInferImpl *impl;
+
+  mirror::Aligner aligner;
 };
 
 /* GStreamer boilerplate. */
