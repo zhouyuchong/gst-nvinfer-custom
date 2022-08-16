@@ -20,16 +20,18 @@
 #include <vector>
 #include <memory>
 
-#include "cuda_runtime_api.h"
+// #include "cuda_runtime_api.h"
 #include "nvbufsurftransform.h"
 #include <nvdsinfer_context.h>
 
-#include "gstnvdsinfer.h"
+// #include "gstnvdsinfer.h"
 
-#include "gstnvdsmeta.h"
+// #include "gstnvdsmeta.h"
 
 #include "nvtx3/nvToolsExt.h"
 #include "align_functions.h"
+
+#include "face_tensor_extractor.h"
 
 /* Package and library details required for plugin_init */
 #define PACKAGE "nvinfer"
@@ -265,8 +267,7 @@ struct _GstNvInfer
   gint operate_on_gie_id;
   std::vector<gboolean> *operate_on_class_ids;
   std::set<uint> *filter_out_class_ids;
-  gint alignment;
-  gint user_meta;
+  
   /** Per source information. */
   std::unordered_map<gint, GstNvInferSourceInfo> *source_info;
   gulong last_map_cleanup_frame_num;
@@ -330,7 +331,10 @@ struct _GstNvInfer
 
   GstNvInferImpl *impl;
 
-  mirror::Aligner aligner;
+  gint alignment;
+  gint user_meta;
+  alignnamespace::Aligner aligner;
+  extractornamespace::Extractor extractor;
 };
 
 /* GStreamer boilerplate. */

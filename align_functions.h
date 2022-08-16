@@ -1,16 +1,16 @@
-#ifndef _FACE_ALIGNER_H_
-#define _FACE_ALIGNER_H_
+#ifndef _DAMONZZZ_ALIGNER_H_
+#define _DAMONZZZ_ALIGNER_H_
 
 #include "opencv2/opencv.hpp"
 
 
-namespace mirror {
+namespace alignnamespace {
 class Aligner {
 public:
 	Aligner();
 	~Aligner();
 
-	cv::Mat AlignFace(const cv::Mat & src, const cv::Mat & dst);
+	cv::Mat AlignFace(const cv::Mat & dst);
 	cv::Mat AlignPlate(const cv::Mat & src, const cv::Mat & dst);
 	
 private:
@@ -18,6 +18,6 @@ private:
 	Impl* impl_;
 };
 
-}
+} // namespace alignnamespace
 
-#endif // !_FACE_ALIGNER_H_
+#endif // !_DAMONZZZ_ALIGNER_H_

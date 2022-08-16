@@ -1,12 +1,28 @@
 #include "align_functions.h"
 #include <iostream>
 
+// default_array use the norm landmarks arcface_src from
+// https://github.com/deepinsight/insightface/blob/master/python-package/insightface/utils/face_align.py
+float standard_face[5][2] = {  
+            {38.2946f+8.0f, 51.6963f},
+            {73.5318f+8.0f, 51.5014f},
+            {56.0252f+8.0f, 71.7366f},
+            {41.5493f+8.0f, 92.3655f},
+            {70.7299f+8.0f, 92.2041f}
+        };
+// standard car plate
+float standard_plate[4][2] = {
+			{94.0f, 0.0f},
+			{0.0f, 0.0f},
+			{0.0f, 24.0f},
+			{94.0f, 24.0f}
+		};
 
-namespace mirror {
+namespace alignnamespace {
 class Aligner::Impl {
 public:
-	cv::Mat AlignFace(const cv::Mat& dist, const cv::Mat& src);
-	cv::Mat AlignPlate(const cv::Mat& dist, const cv::Mat& src);
+	cv::Mat AlignFace(const cv::Mat& dst);
+	cv::Mat AlignPlate(const cv::Mat& dst, const cv::Mat& src);
 
 
 private:
@@ -15,11 +31,13 @@ private:
 	cv::Mat VarAxis0(const cv::Mat &src);
 	int MatrixRank(cv::Mat M);
 	cv::Mat SimilarTransform(const cv::Mat& src, const cv::Mat& dst);
+	
 };
 
 
 Aligner::Aligner() {
 	impl_ = new Impl();
+	
 }
 
 Aligner::~Aligner() {
@@ -28,25 +46,27 @@ Aligner::~Aligner() {
 	}
 }
 
-cv::Mat Aligner::AlignFace(const cv::Mat & src, const cv::Mat & dst) {
-	return impl_->AlignFace(src, dst);
+cv::Mat Aligner::AlignFace(const cv::Mat & dst) {
+	return impl_->AlignFace(dst);
 }
 
 cv::Mat Aligner::AlignPlate(const cv::Mat & src, const cv::Mat & dst) {
 	return impl_->AlignPlate(src, dst);
 }
 
-cv::Mat Aligner::Impl::AlignFace(const cv::Mat & src, const cv::Mat & dst) {
-	std::cout << "start align face." << std::endl;
-    cv::Mat M= SimilarTransform(src, dst);
-    std::cout << "end align face." << std::endl;
+cv::Mat Aligner::Impl::AlignFace(const cv::Mat & dst) {
+	cv::Mat src(5,2,CV_32FC1, standard_face);
+    memcpy(src.data, standard_face, 2 * 5 * sizeof(float));
+	// std::cout << "start align face." << std::endl;
+    cv::Mat M= SimilarTransform(dst, src);
+    // std::cout << "end align face." << std::endl;
 	return M;
 }
 
 cv::Mat Aligner::Impl::AlignPlate(const cv::Mat & src, const cv::Mat & dst) {
-	std::cout << "start align plate." << std::endl;
+	// std::cout << "start align plate." << std::endl;
     cv::Mat M= SimilarTransform(src, dst);
-    std::cout << "end align face." << std::endl;
+    // std::cout << "end align face." << std::endl;
 	return M;
 }
 
