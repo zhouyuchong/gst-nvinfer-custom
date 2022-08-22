@@ -22,7 +22,7 @@ namespace alignnamespace {
 class Aligner::Impl {
 public:
 	cv::Mat AlignFace(const cv::Mat& dst);
-	cv::Mat AlignPlate(const cv::Mat& dst, const cv::Mat& src);
+	cv::Mat AlignPlate(const cv::Mat& dst);
 
 
 private:
@@ -50,8 +50,8 @@ cv::Mat Aligner::AlignFace(const cv::Mat & dst) {
 	return impl_->AlignFace(dst);
 }
 
-cv::Mat Aligner::AlignPlate(const cv::Mat & src, const cv::Mat & dst) {
-	return impl_->AlignPlate(src, dst);
+cv::Mat Aligner::AlignPlate(const cv::Mat & dst) {
+	return impl_->AlignPlate(dst);
 }
 
 cv::Mat Aligner::Impl::AlignFace(const cv::Mat & dst) {
@@ -63,9 +63,12 @@ cv::Mat Aligner::Impl::AlignFace(const cv::Mat & dst) {
 	return M;
 }
 
-cv::Mat Aligner::Impl::AlignPlate(const cv::Mat & src, const cv::Mat & dst) {
+cv::Mat Aligner::Impl::AlignPlate(const cv::Mat & dst) {
+	cv::Mat src(4,2,CV_32FC1, standard_plate);
+    memcpy(src.data, standard_plate, 2 * 4 * sizeof(float));
+	// std::cout << "start align face." << std::endl;
+    cv::Mat M= SimilarTransform(dst, src);
 	// std::cout << "start align plate." << std::endl;
-    cv::Mat M= SimilarTransform(src, dst);
     // std::cout << "end align face." << std::endl;
 	return M;
 }

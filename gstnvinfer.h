@@ -20,18 +20,18 @@
 #include <vector>
 #include <memory>
 
-// headers below are included in face_tensor_extractor.h
 // #include "cuda_runtime_api.h"
-// #include "gstnvdsinfer.h"
-// #include "gstnvdsmeta.h"
-
 #include "nvbufsurftransform.h"
 #include <nvdsinfer_context.h>
+
+// #include "gstnvdsinfer.h"
+
+// #include "gstnvdsmeta.h"
 
 #include "nvtx3/nvToolsExt.h"
 #include "align_functions.h"
 
-#include "face_tensor_extractor.h"
+#include "tensor_extractor.h"
 
 /* Package and library details required for plugin_init */
 #define PACKAGE "nvinfer"

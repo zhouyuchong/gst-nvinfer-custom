@@ -16,7 +16,7 @@ endif
 CXX:= g++
 SRCS:= gstnvinfer.cpp  gstnvinfer_allocator.cpp gstnvinfer_property_parser.cpp \
        gstnvinfer_meta_utils.cpp gstnvinfer_impl.cpp gstnvinfer_yaml_parser.cpp \
-	   align_functions.cpp face_tensor_extractor.cpp
+	   align_functions.cpp tensor_extractor.cpp
 INCS:= $(wildcard *.h)
 LIB:=libnvdsgst_infer.so
 
