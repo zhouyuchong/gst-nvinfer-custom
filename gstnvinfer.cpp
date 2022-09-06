@@ -1402,8 +1402,6 @@ should_trans_object(GstNvInfer * nvinfer)
 }
 
 
-int count = 0; // use to name check pic files
-
 /* use similarTransform matrix to do warp perspective trans */
 // TODO:to crop a picture larger than 112 * 112 
 static void
@@ -1412,7 +1410,6 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M, int track_id, int align_typ
     gint frame_width = (gint)surface->surfaceList[frameIndex].width;
     gint frame_height = (gint)surface->surfaceList[frameIndex].height;
 
-  
     void *src_data = NULL;
     src_data = (char *)malloc(surface->surfaceList[frameIndex].dataSize);
     if (src_data == NULL) {
@@ -1428,20 +1425,18 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M, int track_id, int align_typ
     size_t frame_step = surface->surfaceList[frameIndex].pitch;
     // printf("all_bbox_generated called! colorformat =%d\n", surface->surfaceList[frameIndex].colorFormat);
     cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC3, src_data, frame_step);
+    cv::Mat out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
+    cv::cvtColor(frame, out_mat, CV_RGB2BGR);
+    char yuv_name[100] = "";
+    sprintf(yuv_name, "images/before-of-car-%d.jpg", track_id);  
+    cv::imwrite(yuv_name, out_mat); 
 
-    // cv::Mat out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
-    // cv::cvtColor(frame, out_mat, CV_RGB2BGR);
-    // char yuv_name[100] = "";
-    // sprintf(yuv_name, "images/face-of-person-%d.jpg", track_id);  
-    // cv::imwrite(yuv_name, out_mat);
-    // std::cout<<"save face-"<<track_id<<" before align to local."<<std::endl;
     if (align_type == 1){
       cv::warpPerspective(frame, frame, M, cv::Size(112, 112),cv::INTER_LINEAR);
     }
     else if (align_type == 2){
       cv::warpPerspective(frame, frame, M, cv::Size(94, 24),cv::INTER_LINEAR);
     }
-    
 
     size_t sizeInBytes = surface->surfaceList[frameIndex].dataSize;
     cudaMemcpy((void *)surface->surfaceList[frameIndex].dataPtr,
@@ -1476,9 +1471,7 @@ check_trans(NvBufSurface * surface, int track_id){
     cv::cvtColor(frame, out_mat, CV_RGB2BGR);
     char yuv_name[100] = "";
     sprintf(yuv_name, "images/alignmentface-of-car-%d.jpg", track_id);  
-    cv::imwrite(yuv_name, out_mat);
-    // std::cout<<"save face-"<<track_id<<" stage 1 to local."<<std::endl;
-  
+    cv::imwrite(yuv_name, out_mat); 
   }
 }
 
@@ -1611,39 +1604,30 @@ convert_batch_and_push_to_input_thread_plate_alignment (GstNvInfer *nvinfer,
     return FALSE;
   }
   
-  // float face[5][2]={0};
   float plate[4][2]={0};
   for(auto& r : plate_res) {
-    std::cout<<"now do align of car-"<<object_meta->parent->object_id<<std::endl;
-    // std::cout<<" res size:"<<plate_res.size()<<std::endl;
-    // std::cout<<"1 confi:"<<r.confidence<<" "<<object_meta->confidence<<std::endl;
-    // temporarily we use confidence to match the detections
-    // TODO use bbox for matching
-    // if(r.confidence==object_meta->confidence){
-    float x_width = r.bbox[2];
-    float y_height = r.bbox[3];
-    for(uint i=0;i<4;i++) {
-      //calculate the correct ratio to trans landmarks
-      plate[i][0]=(r.landmark[i*2])/x_width*92;
-      plate[i][1]=(r.landmark[i*2 + 1])/y_height*24;
-      std::cout<<plate[i][0]<<" "<<plate[i][1]<<std::endl;
-      }
-    // }
-    
+    // std::cout<<"now do align of car-"<<object_meta->parent->object_id<<" in frame "<<frame_meta->frame_num<<std::endl;
+    // std::cout<<"bbox coor:"<<r.bbox[0]<<" "<<r.bbox[1]<<" "<<r.bbox[2]<<" "<<r.bbox[3]<<std::endl;
+    float x_ratio = 94/r.bbox[2];
+    float y_ratio = 24/r.bbox[3];
+  
+    plate[0][0]=(r.landmark[4] - r.bbox[0]) * x_ratio;
+    plate[0][1]=(r.landmark[5] - r.bbox[1]) * y_ratio;
+    plate[1][0]=(r.landmark[6] - r.bbox[0]) * x_ratio;
+    plate[1][1]=(r.landmark[7] - r.bbox[1]) * y_ratio;
+    plate[2][0]=(r.landmark[2] - r.bbox[0]) * x_ratio;
+    plate[2][1]=(r.landmark[3] - r.bbox[1]) * y_ratio;
+    plate[3][0]=(r.landmark[0] - r.bbox[0]) * x_ratio;
+    plate[3][1]=(r.landmark[1] - r.bbox[1]) * y_ratio;
+        
   }
   
-  // std::cout<<"******  "<<"Now do alignment on plate of car-"<<object_meta->parent->object_id<<"  ******"<<std::endl;
-  // cv::Mat dst(4,2,CV_32FC1, plate);
-  // memcpy(dst.data, plate, 2 * 4 * sizeof(float));
-  // cv::Mat M = nvinfer->aligner.AlignPlate(dst);
-  // // cv::Mat M2 = AlignmentFunc::similarTransform(dst, src);
-  // // // std::cout<<"M1:"<<M<<"                    "<<" M2"<<M2<<std::endl;
-  // align_preprocess(mem->surf, M, object_meta->parent->object_id, nvinfer->alignment);
-  // memset(plate, 0, sizeof(plate));
-  // check_trans(mem->surf, object_meta->parent->object_id);
-  //save mem->surf to check covering 
+  cv::Mat dst(4,2,CV_32FC1, plate);
+  memcpy(dst.data, plate, 2 * 4 * sizeof(float));
+  cv::Mat M = nvinfer->aligner.AlignPlate(dst);
+  align_preprocess(mem->surf, M, object_meta->parent->object_id, nvinfer->alignment);
+  memset(plate, 0, sizeof(plate));
   check_trans(mem->surf, object_meta->parent->object_id);
-  
 
   LockGMutex locker (nvinfer->process_lock);
   /* Push the batch info structure in the processing queue and notify the output
@@ -2036,21 +2020,16 @@ should_infer_object (GstNvInfer * nvinfer, GstBuffer * inbuf,
   if (nvinfer->operate_on_gie_id > -1 &&
       obj_meta->unique_component_id != nvinfer->operate_on_gie_id)
     return FALSE;
-
   if (obj_meta->rect_params.width < nvinfer->min_input_object_width)
     return FALSE;
-
   if (obj_meta->rect_params.height < nvinfer->min_input_object_height)
     return FALSE;
-
   if (nvinfer->max_input_object_width > 0 &&
       obj_meta->rect_params.width > nvinfer->max_input_object_width)
     return FALSE;
-
   if (nvinfer->max_input_object_height > 0 &&
       obj_meta->rect_params.height > nvinfer->max_input_object_height)
     return FALSE;
-
   /* Infer on object if the operate_on_class_ids list is empty or if
    * the flag at index  class_id is TRUE. */
   if (!nvinfer->operate_on_class_ids->empty () &&
@@ -2058,7 +2037,6 @@ should_infer_object (GstNvInfer * nvinfer, GstBuffer * inbuf,
           nvinfer->operate_on_class_ids->at (obj_meta->class_id) == FALSE)) {
     return FALSE;
   }
-
   if (history && IS_CLASSIFIER_INSTANCE (nvinfer)) {
     gboolean should_reinfer = FALSE;
 
@@ -2076,7 +2054,6 @@ should_infer_object (GstNvInfer * nvinfer, GstBuffer * inbuf,
 
     return should_reinfer;
   }
-
   if (history && IS_DETECTOR_INSTANCE (nvinfer)) {
     gboolean should_reinfer = FALSE;
 
@@ -2084,10 +2061,8 @@ should_infer_object (GstNvInfer * nvinfer, GstBuffer * inbuf,
          nvinfer->secondary_reinfer_interval ||
          nvinfer->secondary_reinfer_interval == DEFAULT_REINFER_INTERVAL)
       should_reinfer = TRUE;
-
     return should_reinfer;
   }
-
   return TRUE;
 }
 
@@ -2111,8 +2086,9 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
   gdouble scale_ratio_x, scale_ratio_y;
   guint offset_left = 0, offset_top = 0;
   gboolean warn_untracked_object = FALSE;
-  std::vector<FaceInfo> face_res;
+  std::vector<FaceInfo>  face_res;
   std::vector<PlateInfo> plate_res;
+  bool lmk_flag = false;
 
   NvDsBatchMeta *batch_meta = gst_buffer_get_nvds_batch_meta (inbuf);
   if (batch_meta == nullptr) {
@@ -2137,7 +2113,9 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
       source_info = &iter->second;
     }
     source_info->last_seen_frame_num = frame_meta->frame_num;
-
+    // if(nvinfer->user_meta == 2){
+    //   std::cout<<"at nvinfer, frame is "<<frame_meta->frame_num<<std::endl;
+    // }
     // if landmarks is generated by pgie, the user-meta data is in frame-meta data
     if(nvinfer->user_meta == 1){
       if (frame_meta->num_obj_meta){
@@ -2237,7 +2215,7 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
             obj_history->cached_info);
         obj_history->last_accessed_frame_num = frame_meta->frame_num;
       }
-
+      // std::cout<<object_meta->rect_params.height<<" "<<nvinfer->min_input_object_height<<" "<<object_meta->confidence<<" "<<nvinfer->user_meta<<"  "<<needs_infer<<std::endl;
       if (!needs_infer) {
         continue;
       }
@@ -2314,23 +2292,23 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
           (nvinfer->classifier_async_mode) ? nullptr : (in_surf->surfaceList +
           frame_meta->batch_id);
       batch->frames.push_back (frame);
-      
+      // std::cout<<nvinfer->user_meta<<std::endl;
+      // if (nvinfer->user_meta ==2 && needs_infer){
+      //   std::cout<<object_meta->rect_params.height<<" "<<nvinfer->min_input_object_height<<" "<<object_meta->parent->confidence<<std::endl;
+      // }
       if (nvinfer->user_meta == 2){
-        
-        NvDsMetaList * l_user = object_meta->parent->obj_user_meta_list;
-        if (nvinfer->alignment == 1){
-          nvinfer->extractor.facelmks(l_user, face_res);
-        }
+        // if (nvinfer->alignment == 1){
+        //   nvinfer->extractor.facelmks(l_user, face_res);
+        // }
         if (nvinfer->alignment == 2){
           // std::cout<<"now extract car-"<<object_meta->parent->object_id<<" lmks, it's confidence is "<<object_meta->confidence<<std::endl;
-          nvinfer->extractor.platelmks(l_user, plate_res);
+          NvDsMetaList * l_user = object_meta->parent->obj_user_meta_list;
+          lmk_flag = nvinfer->extractor.platelmks(l_user, plate_res);
         }
       }
 
-      // std::cout<<nvinfer->alignment<<" "<<batch->frames.size ()<<" "<<nvinfer->max_batch_size<<std::endl;
       /* Submit batch if the batch size has reached max_batch_size. */
       if (batch->frames.size () == nvinfer->max_batch_size && nvinfer->alignment==1) {
-        // std::cout<<"face"<<std::endl;
         if (!convert_batch_and_push_to_input_thread_face_alignment (nvinfer, batch.get(), memory, frame_meta, object_meta, &object_meta->rect_params, face_res)) {
           return GST_FLOW_ERROR;
         }
@@ -2340,8 +2318,7 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
         conv_gst_buf = nullptr;
         nvinfer->tmp_surf.numFilled = 0;
       }
-      else if (batch->frames.size () == nvinfer->max_batch_size && nvinfer->alignment==2) {
-        // std::cout<<"car"<<std::endl;
+      else if (batch->frames.size () == nvinfer->max_batch_size && nvinfer->alignment==2 && lmk_flag) {
         if (!convert_batch_and_push_to_input_thread_plate_alignment (nvinfer, batch.get(), memory, frame_meta, object_meta, &object_meta->rect_params, plate_res)) {
           return GST_FLOW_ERROR;
         }

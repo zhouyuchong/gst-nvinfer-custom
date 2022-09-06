@@ -5,7 +5,7 @@ namespace extractornamespace {
 class Extractor::Impl {
 public:
 	void facelmks(NvDsMetaList * l_user, std::vector<FaceInfo>& res);
-    void platelmks(NvDsMetaList * l_user, std::vector<PlateInfo>& res);
+    bool platelmks(NvDsMetaList * l_user, std::vector<PlateInfo>& res);
 	// cv::Mat AlignPlate(const cv::Mat& dst, const cv::Mat& src);
 
 
@@ -15,7 +15,7 @@ private:
     // bool cmp(PlateInfo& a, PlateInfo& b);
     float iou(float lbox[4], float rbox[4]);
     void nms_and_adapt(std::vector<FaceInfo>& det, std::vector<FaceInfo>& res, float nms_thresh, int width, int height);
-    void nms_and_adapt_plate(std::vector<PlateInfo>& det, std::vector<PlateInfo>& res, float nms_thresh, int width, int height);
+    bool nms_and_adapt_plate(std::vector<PlateInfo>& det, std::vector<PlateInfo>& res, float nms_thresh, int width, int height);
 
     void decode_bbox_retina_face(std::vector<FaceInfo>& res, float *output, float conf_thresh, int width, int height);
     void decode_bbox_retina_plate(std::vector<anchorBox> &anchor, std::vector<PlateInfo>& res, float *bbox, float *lmk, float *conf, 
@@ -38,7 +38,7 @@ void Extractor::facelmks(NvDsMetaList * l_user, std::vector<FaceInfo>& res) {
     return impl_->facelmks(l_user, res);
 }
 
-void Extractor::platelmks(NvDsMetaList * l_user, std::vector<PlateInfo>& res) {
+bool Extractor::platelmks(NvDsMetaList * l_user, std::vector<PlateInfo>& res) {
     return impl_->platelmks(l_user, res);
 }
 
@@ -66,23 +66,24 @@ void Extractor::Impl::facelmks(NvDsMetaList * l_user, std::vector<FaceInfo>& res
     }  
 }
 
-void Extractor::Impl::platelmks(NvDsMetaList * l_user, std::vector<PlateInfo>& res) {
-    static guint use_device_mem = 0;
+bool Extractor::Impl::platelmks(NvDsMetaList * l_user, std::vector<PlateInfo>& res) {
+    static guint use_device_mem = 1;
+    bool flag = false;
     for (;l_user != NULL; l_user = l_user->next) { 
         NvDsUserMeta *user_meta = (NvDsUserMeta *) l_user->data;
         if (user_meta->base_meta.meta_type != NVDSINFER_TENSOR_OUTPUT_META){
-        continue; 
+            continue; 
         }
         /* convert to tensor metadata */
         NvDsInferTensorMeta *meta = (NvDsInferTensorMeta *) user_meta->user_meta_data;
         NvDsInferLayerInfo *info = &meta->output_layers_info[0];
         info->buffer = meta->out_buf_ptrs_host[0];
         if (use_device_mem && meta->out_buf_ptrs_dev[0]) {
-        // get all data from gpu to cpu
-        cudaMemcpy (meta->out_buf_ptrs_host[0], meta->out_buf_ptrs_dev[0],
-            info->inferDims.numElements * 4, cudaMemcpyDeviceToHost);
+            // get all data from gpu to cpu
+            cudaMemcpy (meta->out_buf_ptrs_host[0], meta->out_buf_ptrs_dev[0],
+                info->inferDims.numElements * 4, cudaMemcpyDeviceToHost);
         }
-        std::vector < NvDsInferLayerInfo > outputLayersInfo (meta->output_layers_info, meta->output_layers_info + meta->num_output_layers);
+        std::vector<NvDsInferLayerInfo> outputLayersInfo (meta->output_layers_info, meta->output_layers_info + meta->num_output_layers);
         float *bbox = (float*)(outputLayersInfo[0].buffer);
         float *lmks = (float*)(outputLayersInfo[1].buffer);
         float *conf = (float*)(outputLayersInfo[2].buffer);
@@ -91,8 +92,9 @@ void Extractor::Impl::platelmks(NvDsMetaList * l_user, std::vector<PlateInfo>& r
         std::vector<PlateInfo> temp;
         create_anchor_retina_plate(anchor, PLATE_NETWIDTH, PLATE_NETHEIGHT);
         decode_bbox_retina_plate(anchor, temp, bbox, lmks, conf, CONF_THRESH, PLATE_NETWIDTH, PLATE_NETHEIGHT);
-        nms_and_adapt_plate(temp, res, NMS_THRESH, PLATE_NETWIDTH, PLATE_NETHEIGHT);
+        flag = nms_and_adapt_plate(temp, res, NMS_THRESH, PLATE_NETWIDTH, PLATE_NETHEIGHT);
     }  
+    return flag;
 }
 
 float Extractor::Impl::iou(float lbox[4], float rbox[4]) {
@@ -133,7 +135,7 @@ void Extractor::Impl::nms_and_adapt(std::vector<FaceInfo>& det, std::vector<Face
 
 }
 
-void Extractor::Impl::nms_and_adapt_plate(std::vector<PlateInfo>& det, std::vector<PlateInfo>& res, float nms_thresh, int width, int height) {
+bool Extractor::Impl::nms_and_adapt_plate(std::vector<PlateInfo>& det, std::vector<PlateInfo>& res, float nms_thresh, int width, int height) {
     std::sort(det.begin(), det.end(), [](PlateInfo& a, PlateInfo& b){return a.confidence > b.confidence;});
     for (unsigned int m = 0; m < det.size(); ++m) {
         auto& item = det[m];
@@ -144,6 +146,21 @@ void Extractor::Impl::nms_and_adapt_plate(std::vector<PlateInfo>& det, std::vect
                 --n;
             }
         }
+    }
+    // std::cout<<"after nms, size: "<<res.size()<<std::endl;
+    // top k
+    std::sort(res.begin(), res.end(), [](PlateInfo& a, PlateInfo& b){return a.confidence > b.confidence;});
+    if(res.size() > 1){
+        res.erase(res.begin()+1, res.end()); 
+
+    }
+    // std::cout<<"after topk, size: "<<res.size()<<std::endl;
+    // if nothing extracted, return false
+    if(res.size() != 0){
+        return true;
+    }
+    else{
+        return false;
     }
 }
 
@@ -202,11 +219,11 @@ void Extractor::Impl::decode_bbox_retina_plate(std::vector<anchorBox> &anchor, s
             anchorBox tmp1;
         
             // decode bbox
+            // std::cout<<tmp.cx<<" "<<tmp.cy<<" "<<tmp.sx<<" "<<tmp.sy<<std::endl;
             tmp1.cx = tmp.cx + *bbox * 0.1 * tmp.sx;
             tmp1.cy = tmp.cy + *(bbox + 1) * 0.1 * tmp.sy;
             tmp1.sx = tmp.sx * exp(*(bbox + 2) * 0.2);
             tmp1.sy = tmp.sy * exp(*(bbox + 3) * 0.2);
-            // std::cout<<"bbox"<<tmp1.cx<<" "<<tmp1.cy<<" "<<tmp1.sx<<" "<<tmp1.sy<<std::endl;
 
             PlateInfo det;
             det.bbox[0] = (tmp1.cx - tmp1.sx / 2) * width;
@@ -215,30 +232,18 @@ void Extractor::Impl::decode_bbox_retina_plate(std::vector<anchorBox> &anchor, s
             det.bbox[3] = (tmp1.cy + tmp1.sy / 2) * height - det.bbox[1];
 
             det.bbox[0] = CLIP(det.bbox[0], 0, width - 1);
-            det.bbox[1] = CLIP(det.bbox[1] , 0, height -1); 
+            det.bbox[1] = CLIP(det.bbox[1], 0, height -1); 
             det.bbox[2] = CLIP(det.bbox[2], 0, width - 1);
             det.bbox[3] = CLIP(det.bbox[3], 0, height - 1);
-            // std::cout<<"width and height:"<<width<<" "<<height<<std::endl;
-            // std::cout<<"bbox:";
-            // for (int i1 = 0;i1<4;i1++){
-            //     std::cout<<det.bbox[i1]<<" ";
-            // }
-            // std::cout<<std::endl;
-
+  
             det.confidence = *(conf + 1);
             
             for(unsigned int j = 0; j < 8; ){
                 
-                det.landmark[j]   = tmp.cx + (*lmk + j) * 0.1 * tmp.sx;
-                det.landmark[j+1] = tmp.cy + (*lmk + j + 1) * 0.1 * tmp.sy;
+                det.landmark[j]   = (tmp.cx + *(lmk + j) * 0.1 * tmp.sx) * width;
+                det.landmark[j+1] = (tmp.cy + *(lmk + j + 1) * 0.1 * tmp.sy) * height;
                 j = j + 2;
             }
-            // std::cout<<"lmks:";
-            // for ( int i2=0;i2<8;i2++){
-            //     std::cout<<det.landmark[i2]<<" ";
-            // }
-            // std::cout<<std::endl;
-
             res.push_back(det);
         }
         

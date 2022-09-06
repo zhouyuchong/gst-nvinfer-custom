@@ -12,8 +12,8 @@ float standard_face[5][2] = {
         };
 // standard car plate
 float standard_plate[4][2] = {
+            {0.0f, 0.0f},
 			{94.0f, 0.0f},
-			{0.0f, 0.0f},
 			{0.0f, 24.0f},
 			{94.0f, 24.0f}
 		};

@@ -18,7 +18,7 @@
 
 static constexpr int LOCATIONS = 4;
 static constexpr int FACE_ANCHORS = 10;
-static constexpr int PLATE_ANCHORS = 10;
+static constexpr int PLATE_ANCHORS = 8;
 
 struct alignas(float) FaceInfo{
     float bbox[LOCATIONS];
@@ -46,7 +46,7 @@ public:
 	~Extractor();
 
 	void facelmks (NvDsMetaList * l_user, std::vector<FaceInfo>& res);
-	void platelmks(NvDsMetaList * l_user, std::vector<PlateInfo>& res);
+	bool platelmks(NvDsMetaList * l_user, std::vector<PlateInfo>& res);
 	
 private:
 	class Impl;
