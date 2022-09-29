@@ -8,7 +8,7 @@
 
 #define CLIP(a, min, max) (MAX(MIN(a, max), min))
 #define CONF_THRESH 0.6
-#define VIS_THRESH 0.9
+#define VIS_THRESH 0.75
 #define NMS_THRESH 0.4
 
 #define FACE_NETWIDTH 640

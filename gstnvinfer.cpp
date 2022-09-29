@@ -1145,9 +1145,7 @@ get_converted_buffer (GstNvInfer * nvinfer, NvBufSurface * src_surf,
      * the aspect ratio. */
     double hdest = dest_frame->width * src_height / (double) src_width;
     double wdest = dest_frame->height * src_width / (double) src_height;
-    //std::cout<<"infer id "<<nvinfer->unique_id<<std::endl;
     int pixel_size;
-    //std::cout<<"dest frame: "<<dest_frame->width<<"  "<<dest_frame->height<<std::endl;
     cudaError_t cudaReturn;
 
     if (hdest <= dest_frame->height) {
@@ -1157,7 +1155,6 @@ get_converted_buffer (GstNvInfer * nvinfer, NvBufSurface * src_surf,
       dest_width = wdest;
       dest_height = dest_frame->height;
     }
-    //std::cout<<"final dest size: "<<dest_width<<"  "<<dest_height<<std::endl;
     switch (dest_frame->colorFormat) {
       case NVBUF_COLOR_FORMAT_RGBA:
         pixel_size = 4;
@@ -1262,7 +1259,6 @@ get_converted_buffer (GstNvInfer * nvinfer, NvBufSurface * src_surf,
    */
   ratio_x = (double) dest_width / src_width;
   ratio_y = (double) dest_height / src_height;
-  //std::cout<<"r_x:"<<ratio_x<<" r_y:"<<ratio_y<<std::endl;
 
   /* Create temporary src and dest surfaces for NvBufSurfTransform API. */
   nvinfer->tmp_surf.surfaceList[nvinfer->tmp_surf.numFilled] = *src_frame;
@@ -1273,8 +1269,6 @@ get_converted_buffer (GstNvInfer * nvinfer, NvBufSurface * src_surf,
   /* Set the dest ROI. Could be the entire destination frame or part of it to
    * maintain aspect ratio. */
   if (!nvinfer->symmetric_padding) {
-    //std::cout<<"src "<<src_top<<" "<<src_left<<" "<<src_width<<" "<<src_height<<std::endl;
-    //std::cout<<"dest "<<dest_width<<" "<<dest_height<<std::endl;
     nvinfer->transform_params.dst_rect[nvinfer->tmp_surf.numFilled] =
         { 0, 0, dest_width , dest_height  };
   } else {
@@ -1395,7 +1389,6 @@ static inline gboolean
 should_trans_object(GstNvInfer * nvinfer)
 {
   if (nvinfer->alignment > -1){
-    //std::cout<<nvinfer->alignment<<std::endl;
     return TRUE;
   }
   return FALSE;
@@ -1405,7 +1398,7 @@ should_trans_object(GstNvInfer * nvinfer)
 /* use similarTransform matrix to do warp perspective trans */
 // TODO:to crop a picture larger than 112 * 112 
 static void
-align_preprocess(NvBufSurface * surface, cv::Mat &M, int track_id, int align_type){
+align_preprocess(NvBufSurface * surface, cv::Mat &M, int track_id, int align_type, int frame_num, float face[][2]){
   for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
     gint frame_width = (gint)surface->surfaceList[frameIndex].width;
     gint frame_height = (gint)surface->surfaceList[frameIndex].height;
@@ -1428,11 +1421,26 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M, int track_id, int align_typ
     cv::Mat out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
     cv::cvtColor(frame, out_mat, CV_RGB2BGR);
     char yuv_name[100] = "";
-    sprintf(yuv_name, "images/before-of-car-%d.jpg", track_id);  
+    if (align_type == 1){
+      for(int i=0;i<5;i++){
+        cv::Point centerCircle1(face[i][0], face[i][1]);
+        int radiusCircle = 1;
+        cv::Scalar colorCircle1(0, 0, 255); // (B, G, R)
+        int thicknessCircle1 = 1;
+        cv::circle(out_mat, centerCircle1, radiusCircle, colorCircle1, thicknessCircle1);
+      }
+      
+      sprintf(yuv_name, "images/origin/face-%d.png", track_id);  
+    }
+    else if (align_type == 2){
+      sprintf(yuv_name, "images/origin/plate-of-car-%d-frame-%d.png", track_id, frame_num); 
+    }
+
     cv::imwrite(yuv_name, out_mat); 
 
     if (align_type == 1){
-      cv::warpPerspective(frame, frame, M, cv::Size(112, 112),cv::INTER_LINEAR);
+      cv::Mat transfer_mat = M(cv::Rect(0, 0, 3, 2));
+      cv::warpAffine(frame, frame, transfer_mat, cv::Size(112, 112), 1, 0, 0);
     }
     else if (align_type == 2){
       cv::warpPerspective(frame, frame, M, cv::Size(94, 24),cv::INTER_LINEAR);
@@ -1448,7 +1456,7 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M, int track_id, int align_typ
 
 /* save cropped image to check trans successfully or not */
 static void
-check_trans(NvBufSurface * surface, int track_id){
+check_trans(NvBufSurface * surface, int track_id, int frame_num){
   for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
     gint frame_width = (gint)surface->surfaceList[frameIndex].width;
     gint frame_height = (gint)surface->surfaceList[frameIndex].height;
@@ -1470,7 +1478,7 @@ check_trans(NvBufSurface * surface, int track_id){
     cv::Mat out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
     cv::cvtColor(frame, out_mat, CV_RGB2BGR);
     char yuv_name[100] = "";
-    sprintf(yuv_name, "images/alignmentface-of-car-%d.jpg", track_id);  
+    sprintf(yuv_name, "images/aligned/alignment-%d.png", track_id, frame_num);  
     cv::imwrite(yuv_name, out_mat); 
   }
 }
@@ -1530,25 +1538,21 @@ convert_batch_and_push_to_input_thread_face_alignment (GstNvInfer *nvinfer,
       float y_height = (r.bbox[3]-r.bbox[1]);
       for(uint i=0;i<5;i++) {
         //calculate the correct ratio to trans landmarks
-        face[i][0]=(r.landmark[i*2]-r.bbox[0])/x_width*112;
-        face[i][1]=(r.landmark[i*2 + 1]-r.bbox[1])/y_height*112;
+        face[i][0]=(r.landmark[i*2]  -r.bbox[0])/x_width*112;
+        face[i][1]=(r.landmark[i*2 + 1]  -r.bbox[1])/y_height*112;
       }
     }
     
   }
   
-  std::cout<<"******  "<<"Now do alignment on face of person-"<<object_meta->object_id<<"  ******"<<std::endl;
-  // cv::Mat src(5,2,CV_32FC1, standard_face);
-  // memcpy(src.data, standard_face, 2 * 5 * sizeof(float));
+  // std::cout<<"******  "<<"Now do alignment on face of person-"<<object_meta->object_id<<"  ******"<<std::endl;
   cv::Mat dst(5,2,CV_32FC1, face);
   memcpy(dst.data, face, 2 * 5 * sizeof(float));
   cv::Mat M = nvinfer->aligner.AlignFace(dst);
-  // cv::Mat M2 = AlignmentFunc::similarTransform(dst, src);
-  // std::cout<<"M1:"<<M<<"                    "<<" M2"<<M2<<std::endl;
-  align_preprocess(mem->surf, M, object_meta->object_id, nvinfer->alignment);
+  align_preprocess(mem->surf, M, object_meta->object_id, nvinfer->alignment, 0, face);
   memset(face, 0, sizeof(face));
   //save mem->surf to check covering 
-  check_trans(mem->surf, object_meta->object_id);
+  check_trans(mem->surf, object_meta->object_id, 0);
     
   LockGMutex locker (nvinfer->process_lock);
   /* Push the batch info structure in the processing queue and notify the output
@@ -1624,10 +1628,10 @@ convert_batch_and_push_to_input_thread_plate_alignment (GstNvInfer *nvinfer,
   
   cv::Mat dst(4,2,CV_32FC1, plate);
   memcpy(dst.data, plate, 2 * 4 * sizeof(float));
-  cv::Mat M = nvinfer->aligner.AlignPlate(dst);
-  align_preprocess(mem->surf, M, object_meta->parent->object_id, nvinfer->alignment);
-  memset(plate, 0, sizeof(plate));
-  check_trans(mem->surf, object_meta->parent->object_id);
+  // cv::Mat M = nvinfer->aligner.AlignPlate(dst);
+  // align_preprocess(mem->surf, M, object_meta->parent->object_id, nvinfer->alignment, frame_meta->frame_num);
+  // memset(plate, 0, sizeof(plate));
+  // check_trans(mem->surf, object_meta->parent->object_id, frame_meta->frame_num);
 
   LockGMutex locker (nvinfer->process_lock);
   /* Push the batch info structure in the processing queue and notify the output
@@ -1664,9 +1668,7 @@ get_converted_buffer_face_alignment (GstNvInfer * nvinfer, NvBufSurface * src_su
      * the aspect ratio. */
     double hdest = dest_frame->width * src_height / (double) src_width;
     double wdest = dest_frame->height * src_width / (double) src_height;
-    //std::cout<<"infer id "<<nvinfer->unique_id<<std::endl;
     int pixel_size;
-    //std::cout<<"dest frame: "<<dest_frame->width<<"  "<<dest_frame->height<<std::endl;
     cudaError_t cudaReturn;
 
     if (hdest <= dest_frame->height) {
@@ -1676,7 +1678,6 @@ get_converted_buffer_face_alignment (GstNvInfer * nvinfer, NvBufSurface * src_su
       dest_width = wdest;
       dest_height = dest_frame->height;
     }
-    //std::cout<<"final dest size: "<<dest_width<<"  "<<dest_height<<std::endl;
    
     switch (dest_frame->colorFormat) {
       case NVBUF_COLOR_FORMAT_RGBA:
@@ -1782,7 +1783,6 @@ get_converted_buffer_face_alignment (GstNvInfer * nvinfer, NvBufSurface * src_su
    */
   ratio_x = (double) dest_width / src_width;
   ratio_y = (double) dest_height / src_height;
-  //std::cout<<"r_x:"<<ratio_x<<" r_y:"<<ratio_y<<std::endl;
 
   /* Create temporary src and dest surfaces for NvBufSurfTransform API. */
   nvinfer->tmp_surf.surfaceList[nvinfer->tmp_surf.numFilled] = *src_frame;
@@ -1793,8 +1793,6 @@ get_converted_buffer_face_alignment (GstNvInfer * nvinfer, NvBufSurface * src_su
   /* Set the dest ROI. Could be the entire destination frame or part of it to
    * maintain aspect ratio. */
   if (!nvinfer->symmetric_padding) {
-    //std::cout<<"src "<<src_top<<" "<<src_left<<" "<<src_width<<" "<<src_height<<std::endl;
-    //std::cout<<"dest "<<dest_width<<" "<<dest_height<<std::endl;
     nvinfer->transform_params.dst_rect[nvinfer->tmp_surf.numFilled] =
         { 0, 0, dest_width , dest_height  };
   } else {
