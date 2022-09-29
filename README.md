@@ -26,12 +26,12 @@ first to set primary gie's output-tensor-meta to true. For example, in retinafac
 output-tensor-meta=1
 ```
 
-use kyeword alignment and user-meta in next gie-config file. For example, in arcface config file:
+use kyeword alignment and user-meta in sgie-config file. For example, in arcface config file:
 ```
 alignment=1
 user-meta=1
 ```
-Now only retinaface and arcface(operate on retinaface)
+Now only support face alignment using retinaface and arcface(operate on retinaface)
 
 ## Details
 the custom gst-nvinfer has two new properties: alignment and user-meta.
