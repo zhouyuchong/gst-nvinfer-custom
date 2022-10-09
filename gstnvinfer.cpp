@@ -1145,7 +1145,9 @@ get_converted_buffer (GstNvInfer * nvinfer, NvBufSurface * src_surf,
      * the aspect ratio. */
     double hdest = dest_frame->width * src_height / (double) src_width;
     double wdest = dest_frame->height * src_width / (double) src_height;
+    //std::cout<<"infer id "<<nvinfer->unique_id<<std::endl;
     int pixel_size;
+    //std::cout<<"dest frame: "<<dest_frame->width<<"  "<<dest_frame->height<<std::endl;
     cudaError_t cudaReturn;
 
     if (hdest <= dest_frame->height) {
@@ -1155,6 +1157,7 @@ get_converted_buffer (GstNvInfer * nvinfer, NvBufSurface * src_surf,
       dest_width = wdest;
       dest_height = dest_frame->height;
     }
+    //std::cout<<"final dest size: "<<dest_width<<"  "<<dest_height<<std::endl;
     switch (dest_frame->colorFormat) {
       case NVBUF_COLOR_FORMAT_RGBA:
         pixel_size = 4;
@@ -1259,6 +1262,7 @@ get_converted_buffer (GstNvInfer * nvinfer, NvBufSurface * src_surf,
    */
   ratio_x = (double) dest_width / src_width;
   ratio_y = (double) dest_height / src_height;
+  //std::cout<<"r_x:"<<ratio_x<<" r_y:"<<ratio_y<<std::endl;
 
   /* Create temporary src and dest surfaces for NvBufSurfTransform API. */
   nvinfer->tmp_surf.surfaceList[nvinfer->tmp_surf.numFilled] = *src_frame;
@@ -1269,6 +1273,8 @@ get_converted_buffer (GstNvInfer * nvinfer, NvBufSurface * src_surf,
   /* Set the dest ROI. Could be the entire destination frame or part of it to
    * maintain aspect ratio. */
   if (!nvinfer->symmetric_padding) {
+    //std::cout<<"src "<<src_top<<" "<<src_left<<" "<<src_width<<" "<<src_height<<std::endl;
+    //std::cout<<"dest "<<dest_width<<" "<<dest_height<<std::endl;
     nvinfer->transform_params.dst_rect[nvinfer->tmp_surf.numFilled] =
         { 0, 0, dest_width , dest_height  };
   } else {
@@ -1389,6 +1395,7 @@ static inline gboolean
 should_trans_object(GstNvInfer * nvinfer)
 {
   if (nvinfer->alignment > -1){
+    //std::cout<<nvinfer->alignment<<std::endl;
     return TRUE;
   }
   return FALSE;
@@ -1422,14 +1429,14 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M, int track_id, int align_typ
     cv::cvtColor(frame, out_mat, CV_RGB2BGR);
     char yuv_name[100] = "";
     if (align_type == 1){
-      for(int i=0;i<5;i++){
-        cv::Point centerCircle1(face[i][0], face[i][1]);
-        int radiusCircle = 1;
-        cv::Scalar colorCircle1(0, 0, 255); // (B, G, R)
-        int thicknessCircle1 = 1;
-        cv::circle(out_mat, centerCircle1, radiusCircle, colorCircle1, thicknessCircle1);
-      }
-      
+      // draw landmark points
+      // for(int i=0;i<5;i++){
+      //   cv::Point centerCircle1(face[i][0], face[i][1]);
+      //   int radiusCircle = 1;
+      //   cv::Scalar colorCircle1(0, 0, 255); // (B, G, R)
+      //   int thicknessCircle1 = 1;
+      //   cv::circle(out_mat, centerCircle1, radiusCircle, colorCircle1, thicknessCircle1);
+      // }
       sprintf(yuv_name, "images/origin/face-%d.png", track_id);  
     }
     else if (align_type == 2){
@@ -1483,10 +1490,38 @@ check_trans(NvBufSurface * surface, int track_id, int frame_num){
   }
 }
 
+/* to check face quality */
+static gboolean
+is_front_face(float face[][2]){
+  float width_up   = face[1][0] - face[0][0];
+  float width_down = face[4][0] - face[3][0];
+  float height_left  = face[3][1] - face[0][1];
+  float height_right = face[4][1] - face[1][1];
+
+  if (face[2][0]<(face[0][0] + width_up / 5.f) || face[2][0]<(face[3][0] + width_down / 5.f) || 
+      face[2][0]>(face[1][0] - width_up / 5.f) || face[2][0]>(face[4][0] - width_down / 5.f)){
+    return FALSE;
+  }
+  if (face[2][1]>(face[3][1] - height_left / 5.f) || face[2][1]>(face[4][1] - height_right / 5.f) || 
+      face[2][1]<(face[1][1] + height_left / 5.f) || face[2][1]<(face[0][1] + height_right / 5.f)){
+    return FALSE;
+  }
+  // if (face[2][0]<face[0][0]  || face[2][0]<face[3][0] || 
+  //     face[2][0]>face[1][0]  || face[2][0]>face[4][0] ){
+  //   return FALSE;
+  // }
+  // if (face[2][0]<(face[0][0] + width_up / 5.f) || face[2][0]>(face[1][0] - width_up / 5.f)){
+  //   return FALSE;
+  // }
+  else{
+    return TRUE;
+  }
+}
+
 static gboolean
 convert_batch_and_push_to_input_thread_face_alignment (GstNvInfer *nvinfer,
     GstNvInferBatch *batch, GstNvInferMemory *mem, NvDsFrameMeta *frame_meta, 
-    NvDsObjectMeta *object_meta, NvOSD_RectParams * crop_rect_params, std::vector<FaceInfo>& face_res)
+    NvDsObjectMeta *object_meta, NvOSD_RectParams * crop_rect_params, float face[][2])
 {
   NvBufSurfTransform_Error err = NvBufSurfTransformError_Success;
   std::string nvtx_str;
@@ -1527,24 +1562,7 @@ convert_batch_and_push_to_input_thread_face_alignment (GstNvInfer *nvinfer,
         (NULL));
     return FALSE;
   }
-  
-  float face[5][2]={0};
-  // float plate[4][2]={0};
-  for(auto& r : face_res) {
-    // temporarily we use confidence to match the detections
-    // TODO use bbox for matching
-    if(r.confidence==object_meta->confidence){
-      float x_width = (r.bbox[2]-r.bbox[0]);
-      float y_height = (r.bbox[3]-r.bbox[1]);
-      for(uint i=0;i<5;i++) {
-        //calculate the correct ratio to trans landmarks
-        face[i][0]=(r.landmark[i*2]  -r.bbox[0])/x_width*112;
-        face[i][1]=(r.landmark[i*2 + 1]  -r.bbox[1])/y_height*112;
-      }
-    }
-    
-  }
-  
+
   // std::cout<<"******  "<<"Now do alignment on face of person-"<<object_meta->object_id<<"  ******"<<std::endl;
   cv::Mat dst(5,2,CV_32FC1, face);
   memcpy(dst.data, face, 2 * 5 * sizeof(float));
@@ -1668,7 +1686,9 @@ get_converted_buffer_face_alignment (GstNvInfer * nvinfer, NvBufSurface * src_su
      * the aspect ratio. */
     double hdest = dest_frame->width * src_height / (double) src_width;
     double wdest = dest_frame->height * src_width / (double) src_height;
+    //std::cout<<"infer id "<<nvinfer->unique_id<<std::endl;
     int pixel_size;
+    //std::cout<<"dest frame: "<<dest_frame->width<<"  "<<dest_frame->height<<std::endl;
     cudaError_t cudaReturn;
 
     if (hdest <= dest_frame->height) {
@@ -1678,6 +1698,7 @@ get_converted_buffer_face_alignment (GstNvInfer * nvinfer, NvBufSurface * src_su
       dest_width = wdest;
       dest_height = dest_frame->height;
     }
+    //std::cout<<"final dest size: "<<dest_width<<"  "<<dest_height<<std::endl;
    
     switch (dest_frame->colorFormat) {
       case NVBUF_COLOR_FORMAT_RGBA:
@@ -1783,6 +1804,7 @@ get_converted_buffer_face_alignment (GstNvInfer * nvinfer, NvBufSurface * src_su
    */
   ratio_x = (double) dest_width / src_width;
   ratio_y = (double) dest_height / src_height;
+  //std::cout<<"r_x:"<<ratio_x<<" r_y:"<<ratio_y<<std::endl;
 
   /* Create temporary src and dest surfaces for NvBufSurfTransform API. */
   nvinfer->tmp_surf.surfaceList[nvinfer->tmp_surf.numFilled] = *src_frame;
@@ -1793,6 +1815,8 @@ get_converted_buffer_face_alignment (GstNvInfer * nvinfer, NvBufSurface * src_su
   /* Set the dest ROI. Could be the entire destination frame or part of it to
    * maintain aspect ratio. */
   if (!nvinfer->symmetric_padding) {
+    //std::cout<<"src "<<src_top<<" "<<src_left<<" "<<src_width<<" "<<src_height<<std::endl;
+    //std::cout<<"dest "<<dest_width<<" "<<dest_height<<std::endl;
     nvinfer->transform_params.dst_rect[nvinfer->tmp_surf.numFilled] =
         { 0, 0, dest_width , dest_height  };
   } else {
@@ -2202,7 +2226,6 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
         }
       }
 
-
       /* Asynchronous mode. If we have previous results for the tracked object,
        * attach the results. New results will be attached when inference on the
        * object is complete and the object is present in the frame after that. */
@@ -2213,8 +2236,29 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
             obj_history->cached_info);
         obj_history->last_accessed_frame_num = frame_meta->frame_num;
       }
-      // std::cout<<object_meta->rect_params.height<<" "<<nvinfer->min_input_object_height<<" "<<object_meta->confidence<<" "<<nvinfer->user_meta<<"  "<<needs_infer<<std::endl;
       if (!needs_infer) {
+        continue;
+      }
+
+      float face[5][2]={0};
+      // float plate[4][2]={0};
+      for(auto& r : face_res) {
+        // temporarily we use confidence to match the detections
+        // TODO use bbox for matching
+        if(r.confidence==object_meta->confidence){
+          float x_width = (r.bbox[2]-r.bbox[0]);
+          float y_height = (r.bbox[3]-r.bbox[1]);
+          for(uint i=0;i<5;i++) {
+            //calculate the correct ratio to trans landmarks
+            face[i][0]=(r.landmark[i*2]  -r.bbox[0])/x_width*112;
+            face[i][1]=(r.landmark[i*2 + 1]  -r.bbox[1])/y_height*112;
+          }      
+        }
+      }
+      // if is not a front face, we will drop this
+      if (!is_front_face(face)){
+        memset(face, 0, sizeof(face));
+        std::cout<<"******  "<<"face-"<<object_meta->object_id<<" 不是正脸.  ******"<<std::endl;
         continue;
       }
 
@@ -2261,8 +2305,6 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
       idx = batch->frames.size ();
   
       /* Crop, scale and convert the buffer. */
-      // std::cout<<"crop object:"<<object_meta->object_id<<std::endl;
-      // std::cout<<"obj info:"<<object_meta->confidence<<std::endl;
       if (get_converted_buffer (nvinfer, in_surf,
               in_surf->surfaceList + frame_meta->batch_id,
               &object_meta->rect_params, memory->surf,
@@ -2307,7 +2349,7 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
 
       /* Submit batch if the batch size has reached max_batch_size. */
       if (batch->frames.size () == nvinfer->max_batch_size && nvinfer->alignment==1) {
-        if (!convert_batch_and_push_to_input_thread_face_alignment (nvinfer, batch.get(), memory, frame_meta, object_meta, &object_meta->rect_params, face_res)) {
+        if (!convert_batch_and_push_to_input_thread_face_alignment (nvinfer, batch.get(), memory, frame_meta, object_meta, &object_meta->rect_params, face)) {
           return GST_FLOW_ERROR;
         }
         /* Batch submitted. Set batch to nullptr so that a new GstNvInferBatch

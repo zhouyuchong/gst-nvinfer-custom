@@ -7,7 +7,7 @@
 #include "opencv2/opencv.hpp"
 
 #define CLIP(a, min, max) (MAX(MIN(a, max), min))
-#define CONF_THRESH 0.6
+#define CONF_THRESH 0.1
 #define VIS_THRESH 0.75
 #define NMS_THRESH 0.4
 
