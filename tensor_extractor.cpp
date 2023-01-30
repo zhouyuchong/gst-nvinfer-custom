@@ -70,23 +70,51 @@ bool Extractor::Impl::platelmks(NvDsMetaList * l_user, std::vector<PlateInfo>& r
     static guint use_device_mem = 1;
     bool flag = false;
     for (;l_user != NULL; l_user = l_user->next) { 
+        // std::cout<<"222"<<std::endl;
         NvDsUserMeta *user_meta = (NvDsUserMeta *) l_user->data;
         if (user_meta->base_meta.meta_type != NVDSINFER_TENSOR_OUTPUT_META){
             continue; 
         }
         /* convert to tensor metadata */
         NvDsInferTensorMeta *meta = (NvDsInferTensorMeta *) user_meta->user_meta_data;
-        NvDsInferLayerInfo *info = &meta->output_layers_info[0];
-        info->buffer = meta->out_buf_ptrs_host[0];
+
+        // get bboxs
+        NvDsInferLayerInfo *info_0 = &meta->output_layers_info[0];
+        info_0->buffer = meta->out_buf_ptrs_host[0];
         if (use_device_mem && meta->out_buf_ptrs_dev[0]) {
             // get all data from gpu to cpu
             cudaMemcpy (meta->out_buf_ptrs_host[0], meta->out_buf_ptrs_dev[0],
-                info->inferDims.numElements * 4, cudaMemcpyDeviceToHost);
+                info_0->inferDims.numElements * 4, cudaMemcpyDeviceToHost);
         }
-        std::vector<NvDsInferLayerInfo> outputLayersInfo (meta->output_layers_info, meta->output_layers_info + meta->num_output_layers);
-        float *bbox = (float*)(outputLayersInfo[0].buffer);
-        float *lmks = (float*)(outputLayersInfo[1].buffer);
-        float *conf = (float*)(outputLayersInfo[2].buffer);
+        // double* ptr = (double*)info->buffer;
+        // for( size_t i=0; i<info->inferDims.numElements; i++ )
+        // {
+        //     std::cout << "Tensor " << i << ": " << ptr[i] << std::endl;
+        // }
+        // std::cout<<"copy: "<<info->inferDims.numElements * 4<<std::endl;
+        // std::vector<NvDsInferLayerInfo> outputLayersInfo (meta->output_layers_info, meta->output_layers_info + meta->num_output_layers);
+        float *bbox = (float*)(info_0->buffer);
+
+        //get lmks
+        NvDsInferLayerInfo *info_1 = &meta->output_layers_info[1];
+        info_1->buffer = meta->out_buf_ptrs_host[1];
+        if (use_device_mem && meta->out_buf_ptrs_dev[1]) {
+            // get all data from gpu to cpu
+            cudaMemcpy (meta->out_buf_ptrs_host[1], meta->out_buf_ptrs_dev[1],
+                info_1->inferDims.numElements * 4, cudaMemcpyDeviceToHost);
+        }
+                
+        float *lmks = (float*)(info_1->buffer);
+
+        //get lmks
+        NvDsInferLayerInfo *info_2 = &meta->output_layers_info[2];
+        info_2->buffer = meta->out_buf_ptrs_host[2];
+        if (use_device_mem && meta->out_buf_ptrs_dev[2]) {
+            // get all data from gpu to cpu
+            cudaMemcpy (meta->out_buf_ptrs_host[2], meta->out_buf_ptrs_dev[2],
+                info_2->inferDims.numElements * 4, cudaMemcpyDeviceToHost);
+        }    
+        float *conf = (float*)(info_2->buffer);
 
         std::vector<anchorBox> anchor;
         std::vector<PlateInfo> temp;
@@ -214,6 +242,7 @@ void Extractor::Impl::create_anchor_retina_plate(std::vector<anchorBox> &anchor,
 void Extractor::Impl::decode_bbox_retina_plate(std::vector<anchorBox> &anchor, std::vector<PlateInfo>& res, float *bbox, float *lmk, float *conf, 
                                 float bbox_threshold, int width, int height) {
     for (unsigned int i = 0; i < anchor.size(); ++i) {
+        // std::cout<<*(conf + 1)<<std::endl;
         if (*(conf + 1) > bbox_threshold) {
             anchorBox tmp = anchor[i];
             anchorBox tmp1;

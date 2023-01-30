@@ -1440,6 +1440,14 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M, int track_id, int align_typ
       sprintf(yuv_name, "images/origin/face-%d.png", track_id);  
     }
     else if (align_type == 2){
+      // draw landmark points
+      for(int i=0;i<4;i++){
+        cv::Point centerCircle1(face[i][0], face[i][1]);
+        int radiusCircle = 1;
+        cv::Scalar colorCircle1(0, 0, 255); // (B, G, R)
+        int thicknessCircle1 = 1;
+        cv::circle(out_mat, centerCircle1, radiusCircle, colorCircle1, thicknessCircle1);
+      }
       sprintf(yuv_name, "images/origin/plate-of-car-%d-frame-%d.png", track_id, frame_num); 
     }
 
@@ -1485,7 +1493,36 @@ check_trans(NvBufSurface * surface, int track_id, int frame_num){
     cv::Mat out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
     cv::cvtColor(frame, out_mat, CV_RGB2BGR);
     char yuv_name[100] = "";
-    sprintf(yuv_name, "images/aligned/alignment-%d.png", track_id, frame_num);  
+    sprintf(yuv_name, "images/aligned/alignment-%d.png", track_id);  
+    cv::imwrite(yuv_name, out_mat); 
+  }
+}
+
+/* save cropped image to check trans successfully or not */
+static void
+check_trans_2(NvBufSurface * surface, int track_id, int frame_num){
+  for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
+    gint frame_width = (gint)surface->surfaceList[frameIndex].width;
+    gint frame_height = (gint)surface->surfaceList[frameIndex].height;
+
+    void *src_data = NULL;
+    src_data = (char *)malloc(surface->surfaceList[frameIndex].dataSize);
+    if (src_data == NULL) {
+    g_print("Error: failed to malloc src_data \n");
+    }
+    //auto start = std::chrono::system_clock::now();
+    cudaMemcpy((void *)src_data,
+        (void *)surface->surfaceList[frameIndex].dataPtr,
+        surface->surfaceList[frameIndex].dataSize,
+        cudaMemcpyDeviceToHost);
+    //auto end = std::chrono::system_clock::now();
+    //std::cout << "d to H time usage:"<<std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us" << std::endl;
+    size_t frame_step = surface->surfaceList[frameIndex].pitch;
+    cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC3, src_data, frame_step);
+    cv::Mat out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
+    cv::cvtColor(frame, out_mat, CV_RGB2BGR);
+    char yuv_name[100] = "";
+    sprintf(yuv_name, "images/aligned/before-%d.png", track_id);  
     cv::imwrite(yuv_name, out_mat); 
   }
 }
@@ -1646,10 +1683,11 @@ convert_batch_and_push_to_input_thread_plate_alignment (GstNvInfer *nvinfer,
   
   cv::Mat dst(4,2,CV_32FC1, plate);
   memcpy(dst.data, plate, 2 * 4 * sizeof(float));
-  // cv::Mat M = nvinfer->aligner.AlignPlate(dst);
-  // align_preprocess(mem->surf, M, object_meta->parent->object_id, nvinfer->alignment, frame_meta->frame_num);
-  // memset(plate, 0, sizeof(plate));
-  // check_trans(mem->surf, object_meta->parent->object_id, frame_meta->frame_num);
+  cv::Mat M = nvinfer->aligner.AlignPlate(dst);
+  check_trans_2(mem->surf, object_meta->parent->object_id, frame_meta->frame_num);
+  align_preprocess(mem->surf, M, object_meta->parent->object_id, nvinfer->alignment, frame_meta->frame_num, plate);
+  memset(plate, 0, sizeof(plate));
+  check_trans(mem->surf, object_meta->parent->object_id, frame_meta->frame_num);
 
   LockGMutex locker (nvinfer->process_lock);
   /* Push the batch info structure in the processing queue and notify the output
