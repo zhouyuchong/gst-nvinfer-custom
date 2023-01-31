@@ -5,6 +5,13 @@ This is a custom gst-nvinfer plugin to do some preprocess.
 + Deepstream 6.0+
 + Opencv
 
+## Notice
+This demo supports models:
++ [Retinaface](https://github.com/wang-xinyu/tensorrtx/tree/master/retinaface)
++ [Retina_License_Plate](https://github.com/gm19900510/Pytorch_Retina_License_Plate)
+
+If one wants to use his own models, he should modify codes in `tensor_extractor.cpp` for extracting landmarks from original tensor-output.
+
 ## Usage
 1. set cuda environment
 
@@ -26,20 +33,13 @@ first to set primary gie's output-tensor-meta to true. For example, in retinafac
 output-tensor-meta=1
 ```
 
-use kyeword alignment and user-meta in next gie-config file. For example, in arcface config file:
+use kyewords
++ alignment-type: 1 for face, 2 for license plate
++ alignment-parent: indicates whether user-meta data stored in frame-meta or in object-meta
++ alignment-pics: save pictures or not
+Example
 ```
-alignment=1
-user-meta=1
+alignment-type=2
+alignment-parent=2
+alignment-pics=1
 ```
-Now only retinaface and arcface(operate on retinaface)
-
-## Details
-the custom gst-nvinfer has two new properties: alignment and user-meta.
-
-Once these properties are true, there would be a preprocess on every croped object. 
-
-It first receives the output tensor meta, to extract the 5 landmarks of a face and do NMS. By `similarTransform`, a matrix `M` will be generated.
-
-then use the croped object and M to do alignment: `cv::warpPerspective`.
-
-finally, cover the original surface with the output of alignment.
