@@ -153,7 +153,7 @@ void Extractor::Impl::nms_and_adapt(std::vector<FaceInfo>& det, std::vector<Face
         }
     }
     // crop larger area for better alignment performance 
-    // there I choose to crop 50 more pixel 
+    // there I choose to crop 20 more pixel 
     for (unsigned int m = 0; m < res.size(); ++m) {
         res[m].bbox[0] = CLIP(res[m].bbox[0]-10, 0, width - 1);
         res[m].bbox[1] = CLIP(res[m].bbox[1]-10, 0, height -1);

@@ -12,6 +12,8 @@
 #include <string.h>
 #include <sstream>
 #include <sys/time.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <algorithm>
 #include <cassert>
 #include <condition_variable>
@@ -100,6 +102,8 @@ static GQuark _dsmeta_quark = 0;
 #define DEFAULT_OUTPUT_TENSOR_META FALSE
 #define DEFAULT_OUTPUT_INSTANCE_MASK FALSE
 #define DEFAULT_INPUT_TENSOR_META FALSE
+
+int INIT_SIGNAL = 1;
 
 
 /* By default NVIDIA Hardware allocated memory flows through the pipeline. We
@@ -1410,7 +1414,7 @@ queue_batch:
 /* use similarTransform matrix to do warp perspective trans */
 // TODO:to crop a picture larger than 112 * 112 
 static void
-align_preprocess(NvBufSurface * surface, cv::Mat &M, int track_id, int align_type, int frame_num, float face[][2]){
+align_preprocess(NvBufSurface * surface, cv::Mat &M, int track_id, int align_type, int frame_num){
   for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
     gint frame_width = (gint)surface->surfaceList[frameIndex].width;
     gint frame_height = (gint)surface->surfaceList[frameIndex].height;
@@ -1428,36 +1432,10 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M, int track_id, int align_typ
     //auto end = std::chrono::system_clock::now();
     //std::cout << "d to H time usage:"<<std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us" << std::endl;
     size_t frame_step = surface->surfaceList[frameIndex].pitch;
-    // printf("all_bbox_generated called! colorformat =%d\n", surface->surfaceList[frameIndex].colorFormat);
     cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC3, src_data, frame_step);
     cv::Mat out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
     cv::cvtColor(frame, out_mat, CV_RGB2BGR);
-    char yuv_name[100] = "";
-    if (align_type == 1){
-      // draw landmark points
-      // for(int i=0;i<5;i++){
-      //   cv::Point centerCircle1(face[i][0], face[i][1]);
-      //   int radiusCircle = 1;
-      //   cv::Scalar colorCircle1(0, 0, 255); // (B, G, R)
-      //   int thicknessCircle1 = 1;
-      //   cv::circle(out_mat, centerCircle1, radiusCircle, colorCircle1, thicknessCircle1);
-      // }
-      sprintf(yuv_name, "images/origin/face-%d.png", track_id);  
-    }
-    else if (align_type == 2){
-      // draw landmark points
-      for(int i=0;i<4;i++){
-        cv::Point centerCircle1(face[i][0], face[i][1]);
-        int radiusCircle = 1;
-        cv::Scalar colorCircle1(0, 0, 255); // (B, G, R)
-        int thicknessCircle1 = 1;
-        cv::circle(out_mat, centerCircle1, radiusCircle, colorCircle1, thicknessCircle1);
-      }
-      sprintf(yuv_name, "images/origin/plate-of-car-%d-frame-%d.png", track_id, frame_num); 
-    }
-
-    cv::imwrite(yuv_name, out_mat); 
-
+    
     if (align_type == 1){
       cv::Mat transfer_mat = M(cv::Rect(0, 0, 3, 2));
       cv::warpAffine(frame, frame, transfer_mat, cv::Size(112, 112), 1, 0, 0);
@@ -1476,7 +1454,7 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M, int track_id, int align_typ
 
 /* save cropped image to check trans successfully or not */
 static void
-check_trans(NvBufSurface * surface, int track_id, int frame_num){
+save_aligned_pics(NvBufSurface * surface, int track_id, int frame_num){
   for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
     gint frame_width = (gint)surface->surfaceList[frameIndex].width;
     gint frame_height = (gint)surface->surfaceList[frameIndex].height;
@@ -1505,7 +1483,7 @@ check_trans(NvBufSurface * surface, int track_id, int frame_num){
 
 /* save cropped image to check trans successfully or not */
 static void
-check_trans_2(NvBufSurface * surface, int track_id, int frame_num){
+save_before_pics(NvBufSurface * surface, int track_id, int frame_num, int align_type, float matrix[][2]){
   for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
     gint frame_width = (gint)surface->surfaceList[frameIndex].width;
     gint frame_height = (gint)surface->surfaceList[frameIndex].height;
@@ -1526,8 +1504,29 @@ check_trans_2(NvBufSurface * surface, int track_id, int frame_num){
     cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC3, src_data, frame_step);
     cv::Mat out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
     cv::cvtColor(frame, out_mat, CV_RGB2BGR);
+
     char yuv_name[100] = "";
-    sprintf(yuv_name, "images/aligned/before-%d.png", track_id);  
+    sprintf(yuv_name, "images/before/before-%d.png", track_id);  
+    if (align_type == 1){
+      // draw landmark points
+      for(int i=0;i<5;i++){
+        cv::Point centerCircle1(matrix[i][0], matrix[i][1]);
+        int radiusCircle = 1;
+        cv::Scalar colorCircle1(0, 0, 255); // (B, G, R)
+        int thicknessCircle1 = 1;
+        cv::circle(out_mat, centerCircle1, radiusCircle, colorCircle1, thicknessCircle1);
+      }
+    }
+    else if (align_type == 2){
+      // draw landmark points
+      for(int i=0;i<4;i++){
+        cv::Point centerCircle1(matrix[i][0], matrix[i][1]);
+        int radiusCircle = 1;
+        cv::Scalar colorCircle1(0, 0, 255); // (B, G, R)
+        int thicknessCircle1 = 1;
+        cv::circle(out_mat, centerCircle1, radiusCircle, colorCircle1, thicknessCircle1);
+      }
+    }
     cv::imwrite(yuv_name, out_mat); 
   }
 }
@@ -1558,6 +1557,21 @@ is_front_face(float face[][2]){
   else{
     return TRUE;
   }
+}
+
+
+static void 
+mkdir_pics(const std::string &output_path){
+    if (access(output_path.c_str(), 0) == -1) {
+        // mkdir(output_path.c_str(),S_IRUSR | S_IWUSR | S_IXUSR | S_IRWXG | S_IRWXO);
+        system(("mkdir "+output_path).c_str());
+        std::cout<<output_path<<" create! "<<std::endl;
+    }
+    else {
+        system(("rm -rf "+output_path).c_str());
+        system(("mkdir "+output_path).c_str());
+        std::cout<<output_path<<" recover create! "<<std::endl;
+    }
 }
 
 static gboolean
@@ -1609,10 +1623,10 @@ convert_batch_and_push_to_input_thread_face_alignment (GstNvInfer *nvinfer,
   cv::Mat dst(5,2,CV_32FC1, face);
   memcpy(dst.data, face, 2 * 5 * sizeof(float));
   cv::Mat M = nvinfer->aligner.AlignFace(dst);
-  align_preprocess(mem->surf, M, object_meta->object_id, nvinfer->alignment_type, 0, face);
+  align_preprocess(mem->surf, M, object_meta->object_id, nvinfer->alignment_type, 0);
   memset(face, 0, sizeof(face));
   //save mem->surf to check covering 
-  check_trans(mem->surf, object_meta->object_id, 0);
+  save_aligned_pics(mem->surf, object_meta->object_id, 0);
     
   LockGMutex locker (nvinfer->process_lock);
   /* Push the batch info structure in the processing queue and notify the output
@@ -1685,15 +1699,20 @@ convert_batch_and_push_to_input_thread_plate_alignment (GstNvInfer *nvinfer,
     plate[3][1]=(r.landmark[1] - r.bbox[1]) * y_ratio;
         
   }
-  
+  if(nvinfer->alignment_pics){
+    save_before_pics(mem->surf, object_meta->parent->object_id, frame_meta->frame_num, nvinfer->alignment_type, plate);
+  }
+
   cv::Mat dst(4,2,CV_32FC1, plate);
   memcpy(dst.data, plate, 2 * 4 * sizeof(float));
   cv::Mat M = nvinfer->aligner.AlignPlate(dst);
-  check_trans_2(mem->surf, object_meta->parent->object_id, frame_meta->frame_num);
-  align_preprocess(mem->surf, M, object_meta->parent->object_id, nvinfer->alignment_type, frame_meta->frame_num, plate);
+  align_preprocess(mem->surf, M, object_meta->parent->object_id, nvinfer->alignment_type, frame_meta->frame_num);
   memset(plate, 0, sizeof(plate));
-  check_trans(mem->surf, object_meta->parent->object_id, frame_meta->frame_num);
-
+  
+  if(nvinfer->alignment_pics){
+    save_aligned_pics(mem->surf, object_meta->parent->object_id, frame_meta->frame_num);
+  }
+  
   LockGMutex locker (nvinfer->process_lock);
   /* Push the batch info structure in the processing queue and notify the output
    * thread that a new batch has been queued. */
@@ -2154,6 +2173,17 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
   std::vector<FaceInfo>  face_res;
   std::vector<PlateInfo> plate_res;
   bool lmk_flag = false;
+
+  if (nvinfer->alignment_pics && INIT_SIGNAL){
+    std::string image_path = "images";
+    mkdir_pics(image_path);
+    std::string before_image_path = "images/before";
+    mkdir_pics(before_image_path);
+    std::string aligned = "images/aligned";
+    mkdir_pics(aligned);
+    INIT_SIGNAL = 0;
+
+  }
 
   NvDsBatchMeta *batch_meta = gst_buffer_get_nvds_batch_meta (inbuf);
   if (batch_meta == nullptr) {
