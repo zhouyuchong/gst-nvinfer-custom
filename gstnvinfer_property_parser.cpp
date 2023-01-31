@@ -428,17 +428,22 @@ gst_nvinfer_parse_other_attribute (GstNvInfer * nvinfer,
           nvinfer->max_input_object_height);
       goto done;
     }
-  } else if (!g_strcmp0 (key, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT)) {
+  } else if (!g_strcmp0 (key, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_TYPE)) {
     if ((*nvinfer->is_prop_set)[PROP_OPERATE_ON_GIE_ID] ||
         (*nvinfer->is_prop_set)[PROP_OPERATE_ON_CLASS_IDS])
       return TRUE;
-    nvinfer->alignment = g_key_file_get_integer (key_file,
-        group_name, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT,
+    nvinfer->alignment_type = g_key_file_get_integer (key_file,
+        group_name, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_TYPE,
         &error);
     CHECK_ERROR (error);
-  } else if (!g_strcmp0 (key, CONFIG_GROUP_INFER_INPUT_OBJECT_USER_META)) {
-    nvinfer->user_meta = g_key_file_get_integer (key_file,
-        group_name, CONFIG_GROUP_INFER_INPUT_OBJECT_USER_META,
+  } else if (!g_strcmp0 (key, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_PARENT)) {
+    nvinfer->alignment_parent = g_key_file_get_integer (key_file,
+        group_name, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_PARENT,
+        &error);
+    CHECK_ERROR (error);
+  } else if (!g_strcmp0 (key, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_PICS)) {
+    nvinfer->alignment_pics = g_key_file_get_integer (key_file,
+        group_name, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_PICS,
         &error);
     CHECK_ERROR (error);
   } else if (!g_strcmp0 (key, CONFIG_GROUP_INFER_GIE_ID_FOR_OPERATION)) {

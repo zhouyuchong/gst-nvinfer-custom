@@ -122,8 +122,9 @@
 #define CONFIG_GROUP_INFER_INPUT_OBJECT_MAX_WIDTH "input-object-max-width"
 #define CONFIG_GROUP_INFER_INPUT_OBJECT_MAX_HEIGHT "input-object-max-height"
 
-#define CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT "alignment"
-#define CONFIG_GROUP_INFER_INPUT_OBJECT_USER_META "user-meta"
+#define CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_TYPE "alignment-type"
+#define CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_PARENT "alignment-parent"
+#define CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_PICS "alignment-pics"
 
 /** Parameters for filtering objects based on class-id and unique id of the
     detector when operating in secondary mode. */

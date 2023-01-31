@@ -67,8 +67,9 @@ enum
   PROP_PROCESS_MODE,
   PROP_CONFIG_FILE_PATH,
   PROP_OPERATE_ON_GIE_ID,
-  PROP_ALIGNMENT,
-  PROP_USER_META,
+  PROP_ALIGNMENT_TYPE,
+  PROP_ALIGNMENT_PARENT,
+  PROP_ALIGNMENT_PICS,
   PROP_OPERATE_ON_CLASS_IDS,
   PROP_FILTER_OUT_CLASS_IDS,
   PROP_MODEL_ENGINEFILE,
@@ -331,8 +332,9 @@ struct _GstNvInfer
 
   GstNvInferImpl *impl;
 
-  gint alignment;
-  gint user_meta;
+  gint alignment_type;
+  gint alignment_parent;
+  gint alignment_pics;
   alignnamespace::Aligner aligner;
   extractornamespace::Extractor extractor;
 };

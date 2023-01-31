@@ -300,10 +300,12 @@ gst_nvinfer_parse_other_attribute_yaml (GstNvInfer * nvinfer,
             val);
         goto done;
     }
-  } else if (pair[0] == "alignment"){
-    nvinfer->alignment = std::stoi(pair[1]);
-  } else if (pair[0] == "user-meta"){
-    nvinfer->user_meta = std::stoi(pair[1]);
+  } else if (pair[0] == "alignment-type"){
+    nvinfer->alignment_type = std::stoi(pair[1]);
+  } else if (pair[0] == "alignment-parent"){
+    nvinfer->alignment_parent = std::stoi(pair[1]);
+  } else if (pair[0] == "alignment-pics"){
+    nvinfer->alignment_pics = std::stoi(pair[1]);
   } else if (pair[0] == "classifier-async-mode") {
       nvinfer->classifier_async_mode = std::stoi(pair[1]);
   } else if (pair[0] == "classifier-type") {
