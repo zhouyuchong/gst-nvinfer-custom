@@ -12,9 +12,12 @@
 #define NMS_THRESH 0.4
 
 #define FACE_NETWIDTH 640
-#define FACE_NETHEIGHT 640
-#define PLATE_NETWIDTH 1160
-#define PLATE_NETHEIGHT 720
+#define FACE_NETHEIGHT 480
+#define PLATE_NETWIDTH 1920
+#define PLATE_NETHEIGHT 1080
+
+#define STREAMMUX_WIDTH 3392
+#define STREAMMUX_HEIGHT 2000
 
 static constexpr int LOCATIONS = 4;
 static constexpr int FACE_ANCHORS = 10;

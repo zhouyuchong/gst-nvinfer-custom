@@ -10,7 +10,7 @@ This demo supports models:
 + [Retinaface](https://github.com/wang-xinyu/tensorrtx/tree/master/retinaface)
 + [Retina_License_Plate](https://github.com/gm19900510/Pytorch_Retina_License_Plate)
 
-If one wants to use his own models, he should modify codes in `tensor_extractor.cpp` for extracting landmarks from original tensor-output.
+If one wants to use his own models, he should modify codes in `tensor_extractor.cpp` for extracting landmarks from original tensor-output and `align_funcitons`.
 
 ## Usage
 1. set cuda environment

@@ -64,6 +64,7 @@ void Extractor::Impl::facelmks(NvDsMetaList * l_user, std::vector<FaceInfo>& res
         decode_bbox_retina_face(temp, output, CONF_THRESH, FACE_NETWIDTH, FACE_NETHEIGHT);
         nms_and_adapt(temp, res, NMS_THRESH, FACE_NETWIDTH, FACE_NETHEIGHT);
     }  
+    return;
 }
 
 bool Extractor::Impl::platelmks(NvDsMetaList * l_user, std::vector<PlateInfo>& res) {
@@ -155,10 +156,10 @@ void Extractor::Impl::nms_and_adapt(std::vector<FaceInfo>& det, std::vector<Face
     // crop larger area for better alignment performance 
     // there I choose to crop 20 more pixel 
     for (unsigned int m = 0; m < res.size(); ++m) {
-        res[m].bbox[0] = CLIP(res[m].bbox[0]-10, 0, width - 1);
-        res[m].bbox[1] = CLIP(res[m].bbox[1]-10, 0, height -1);
-        res[m].bbox[2] = CLIP(res[m].bbox[2]+20, 0, width - 1);
-        res[m].bbox[3] = CLIP(res[m].bbox[3]+20, 0, height - 1);
+        res[m].bbox[0] = CLIP(res[m].bbox[0], 0, width - 1);
+        res[m].bbox[1] = CLIP(res[m].bbox[1], 0, height -1);
+        res[m].bbox[2] = CLIP(res[m].bbox[2], 0, width - 1);
+        res[m].bbox[3] = CLIP(res[m].bbox[3], 0, height - 1);
     }
 
 }
