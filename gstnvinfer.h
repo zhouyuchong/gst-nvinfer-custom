@@ -19,6 +19,7 @@
 #include <unordered_map>
 #include <vector>
 #include <memory>
+#include <map>
 
 // #include "cuda_runtime_api.h"
 #include "nvbufsurftransform.h"
@@ -331,6 +332,15 @@ struct _GstNvInfer
   nvtxDomainHandle_t nvtx_domain;
 
   GstNvInferImpl *impl;
+
+  std::map<int, cv::Mat> *crop_data;
+  cv::Mat *cvmat;
+
+  gint processing_width;
+  gint processing_height;
+  NvBufSurface *inter_buf;
+  // Host buffer to store RGB data for use by algorithm
+  void *host_rgb_buf;
 
   gint alignment_type;
   gint alignment_parent;

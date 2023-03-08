@@ -5,17 +5,21 @@
 #include "gstnvdsmeta.h"
 #include "gstnvdsinfer.h"
 #include "opencv2/opencv.hpp"
+#include "spdlog/spdlog.h"
 
 #define CLIP(a, min, max) (MAX(MIN(a, max), min))
 #define CONF_THRESH 0.1
 #define VIS_THRESH 0.75
 #define NMS_THRESH 0.4
 
+#define YOLO_NETWIDTH 640
+#define YOLO_NETHEIGHT 640
 #define FACE_NETWIDTH 640
 #define FACE_NETHEIGHT 480
 #define PLATE_NETWIDTH 1920
 #define PLATE_NETHEIGHT 1080
 
+// Note should be same with streammux config
 #define STREAMMUX_WIDTH 3392
 #define STREAMMUX_HEIGHT 2000
 
