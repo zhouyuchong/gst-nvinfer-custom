@@ -51,3 +51,11 @@ alignment-parent=2
 alignment-pics=1
 alignment-debug-level=3
 ```
+
+
+## Comparison
+License Plate
+![car](./car.png)
+Saved input NvBufSurface
+
+![plate](plate.png)
