@@ -125,6 +125,7 @@
 #define CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_TYPE "alignment-type"
 #define CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_PARENT "alignment-parent"
 #define CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_PICS "alignment-pics"
+#define CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_DEBUG_LEVEL "alignment-debug-level"
 
 /** Parameters for filtering objects based on class-id and unique id of the
     detector when operating in secondary mode. */

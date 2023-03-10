@@ -104,6 +104,7 @@ static GQuark _dsmeta_quark = 0;
 #define DEFAULT_OPERATE_ON_GIE_ID -1
 #define DEFAULT_ALIGNMENT_TYPE -1
 #define DEFAULT_ALIGNMENT_PARENT -1
+#define DEFAULT_ALIGNMENT_DEBUG_LEVEL 0
 #define DEFAULT_ALIGNMENT_PICS 0
 #define DEFAULT_GPU_DEVICE_ID 0
 #define DEFAULT_OUTPUT_WRITE_TO_FILE FALSE
@@ -306,6 +307,14 @@ gst_nvinfer_class_init (GstNvInferClass * klass)
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
               GST_PARAM_MUTABLE_READY)));
 
+  g_object_class_install_property (gobject_class, PROP_ALIGNMENT_DEBUG_LEVEL,
+      g_param_spec_int ("alignment-debug-level", "debug level",
+          "Indicates usermeta-data source.\n"
+          "\t\t\tSet to 1 for frame to 2 for object.",
+          -1, G_MAXINT, DEFAULT_ALIGNMENT_DEBUG_LEVEL,
+          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
+              GST_PARAM_MUTABLE_READY)));
+
   g_object_class_install_property (gobject_class, PROP_ALIGNMENT_PICS,
       g_param_spec_int ("save-pics", "",
           "flag for saving pics or not.\n"
@@ -440,9 +449,12 @@ gst_nvinfer_init (GstNvInfer * nvinfer)
       DEFAULT_BATCH_SIZE;
   nvinfer->interval = DEFAULT_INTERVAL;
   nvinfer->operate_on_gie_id = DEFAULT_OPERATE_ON_GIE_ID;
+
+  // custom properties
   nvinfer->alignment_type = DEFAULT_ALIGNMENT_TYPE;
   nvinfer->alignment_parent = DEFAULT_ALIGNMENT_PARENT;
   nvinfer->alignment_pics = DEFAULT_ALIGNMENT_PICS;
+  nvinfer->alignment_debug_level = DEFAULT_ALIGNMENT_DEBUG_LEVEL;
   nvinfer->gpu_id = impl->m_InitParams->gpuID = DEFAULT_GPU_DEVICE_ID;
   nvinfer->is_prop_set = new std::vector < gboolean > (PROP_LAST, FALSE);
   nvinfer->crop_data = new std::map<int, cv::Mat>;
@@ -547,6 +559,9 @@ gst_nvinfer_set_property (GObject * object, guint prop_id,
       break;
     case PROP_ALIGNMENT_PICS:
       nvinfer->alignment_pics = g_value_get_int (value);
+      break;
+    case PROP_ALIGNMENT_DEBUG_LEVEL:
+      nvinfer->alignment_debug_level = g_value_get_int (value);
       break;
     case PROP_OPERATE_ON_CLASS_IDS:
     {
@@ -662,6 +677,9 @@ gst_nvinfer_get_property (GObject * object, guint prop_id,
       break;
     case PROP_ALIGNMENT_PICS:
       g_value_set_int (value, nvinfer->alignment_pics);
+      break;
+    case PROP_ALIGNMENT_DEBUG_LEVEL:
+      g_value_set_int (value, nvinfer->alignment_debug_level);
       break;
     case PROP_OPERATE_ON_CLASS_IDS:
     {
@@ -1336,7 +1354,6 @@ get_converted_mat (GstNvInfer * nvinfer, NvBufSurface *src_surf, gint idx,
         goto error;
     }
 
-
     return GST_FLOW_OK;
 
     error:
@@ -1797,7 +1814,7 @@ get_images(NvBufSurface * surface, NvDsObjectMeta *object_meta, float pic_width,
 
 /* save cropped image to check trans successfully or not */
 static void
-save_aligned_pics(NvBufSurface * surface, int track_id, int frame_num){
+save_aligned_pics(NvBufSurface * surface, int track_id){
   for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
     gint frame_width = (gint)surface->surfaceList[frameIndex].width;
     gint frame_height = (gint)surface->surfaceList[frameIndex].height;
@@ -1819,9 +1836,9 @@ save_aligned_pics(NvBufSurface * surface, int track_id, int frame_num){
     size_t frame_step = surface->surfaceList[frameIndex].pitch;
 
     cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC3, src_data, frame_step);
-    char yuv_name[100] = "";
-    sprintf(yuv_name, "images/aligned/alignment-%d.png", track_id);  
-    cv::imwrite(yuv_name, frame); 
+    char img_name[100] = "";
+    sprintf(img_name, "images/aligned/alignment-%d.png", track_id);  
+    cv::imwrite(img_name, frame); 
     auto end_save = std::chrono::system_clock::now();
     spdlog::debug("Aligned image be saved to local, time cost: {} us.", std::chrono::duration_cast<std::chrono::microseconds>(end_save - end).count());
 
@@ -1977,17 +1994,16 @@ is_front_face(float face[][2]){
 
 static void 
 mkdir_pics(const std::string &output_path){
-    spdlog::set_level(spdlog::level::trace);
-    if (access(output_path.c_str(), 0) == -1) {
-        // mkdir(output_path.c_str(),S_IRUSR | S_IWUSR | S_IXUSR | S_IRWXG | S_IRWXO);
-        system(("mkdir "+output_path).c_str());
-        spdlog::info("{} create.", output_path);
-    }
-    else {
-        system(("rm -rf "+output_path).c_str());
-        system(("mkdir "+output_path).c_str());
-        spdlog::info("{} recover create.", output_path);
-    }
+  if (access(output_path.c_str(), 0) == -1) {
+      // mkdir(output_path.c_str(),S_IRUSR | S_IWUSR | S_IXUSR | S_IRWXG | S_IRWXO);
+      system(("mkdir "+output_path).c_str());
+      spdlog::info("{} create.", output_path);
+  }
+  else {
+      system(("rm -rf "+output_path).c_str());
+      system(("mkdir "+output_path).c_str());
+      spdlog::info("{} recover create.", output_path);
+  }
 }
 
 static gboolean
@@ -2026,23 +2042,14 @@ convert_batch_and_push_to_input_thread_face_alignment (GstNvInfer *nvinfer,
 
   auto start = std::chrono::system_clock::now();
   char img_name[100] = "";
-  // This picture will be stored in database
-  // time_t t = time(0);
-  // char tmp[32] = { NULL };
-  // strftime(tmp, sizeof(tmp), "%Y-%m-%d-%H:%M:%S", localtime(&t));
-  // std::string date(tmp);
-  // sprintf(yuv_name, "images/before/origin-%d-%s.png", object_meta->object_id, date.c_str());  
-
   sprintf(img_name, "images/before/origin-%d.png", object_meta->object_id);  
   cv::imwrite(img_name, cropped); 
   auto CheckPoint_img = std::chrono::system_clock::now();
-  spdlog::debug("Image save to local time cost: {} us.", std::chrono::duration_cast<std::chrono::microseconds>(CheckPoint_img - start).count());
+  spdlog::debug("Image face-{} save to local time cost: {} us.",object_meta->object_id, std::chrono::duration_cast<std::chrono::microseconds>(CheckPoint_img - start).count());
 
   if (batch->frames.size() > 0) {
     /* Batched tranformation. */
     // for some reason, if use async, there will be a latency and cause disorder.
-    // err = NvBufSurfTransformAsync (&nvinfer->tmp_surf, mem->surf,
-    //           &nvinfer->transform_params, &batch->sync_obj);
     err = NvBufSurfTransform (&nvinfer->tmp_surf, mem->surf,
               &nvinfer->transform_params);
   }
@@ -2060,18 +2067,15 @@ convert_batch_and_push_to_input_thread_face_alignment (GstNvInfer *nvinfer,
   align_preprocess(mem->surf, M, nvinfer->alignment_type, object_meta->object_id, whole_frame);
   memset(face, 0, sizeof(face));
 
-  //save mem->surf to check covering 
-  save_aligned_pics(mem->surf, object_meta->object_id, frame_meta->frame_num);
-  
-  // if(nvinfer->alignment_pics == 2){
-  //   if(nvinfer->alignment_parent == 2) {
-  //     save_aligned_pics(mem->surf, object_meta->parent->object_id, frame_meta->frame_num);
-  //   }
-  //   else {
-  //     save_aligned_pics(mem->surf, object_meta->object_id, frame_meta->frame_num);
-  //   }
-  // }
-  // save_aligned_pics(mem->surf, object_meta->object_id, frame_meta->frame_num);
+  //save mem->surf to check covering   
+  if(nvinfer->alignment_pics == 2){
+    if(nvinfer->alignment_parent == 2) {
+      save_aligned_pics(mem->surf, object_meta->parent->object_id);
+    }
+    else {
+      save_aligned_pics(mem->surf, object_meta->object_id);
+    }
+  }
     
   LockGMutex locker (nvinfer->process_lock);
   /* Push the batch info structure in the processing queue and notify the output
@@ -2116,13 +2120,6 @@ convert_batch_and_push_to_input_thread_plate_alignment (GstNvInfer *nvinfer,
 
   std::tie(cropped, whole_frame) = get_images(&nvinfer->tmp_surf, object_meta, pic_width, pic_height);
 
-  auto start = std::chrono::system_clock::now();
-  char img_name[100] = "";
-  sprintf(img_name, "images/before/origin-%d.png", object_meta->object_id);  
-  cv::imwrite(img_name, cropped); 
-  auto CheckPoint_img = std::chrono::system_clock::now();
-  spdlog::debug("Image save to local time cost: {} us.", std::chrono::duration_cast<std::chrono::microseconds>(CheckPoint_img - start).count());
-
   if (batch->frames.size() > 0) {
     // auto start = std::chrono::system_clock::now();
     /* Batched tranformation. */
@@ -2131,11 +2128,6 @@ convert_batch_and_push_to_input_thread_plate_alignment (GstNvInfer *nvinfer,
     //           &nvinfer->transform_params, &batch->sync_obj);
     err = NvBufSurfTransform (&nvinfer->tmp_surf, mem->surf,
               &nvinfer->transform_params);
-
-    // auto end = std::chrono::system_clock::now();
-    // std::cout << "gpu conv: time usage:"<<std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us" << std::endl;
-
-
   }
 
   if (err != NvBufSurfTransformError_Success) {
@@ -2665,6 +2657,15 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
   float face[5][2]={0};
 
   if (nvinfer->alignment_pics && INIT_SIGNAL){
+    if(nvinfer->alignment_debug_level == 3){
+    spdlog::set_level(spdlog::level::trace);
+    } else if(nvinfer->alignment_debug_level == 2) {
+      spdlog::set_level(spdlog::level::debug);
+    } else if(nvinfer->alignment_debug_level == 1) {
+      spdlog::set_level(spdlog::level::info);
+    } else if(nvinfer->alignment_debug_level == 0) {
+      spdlog::set_level(spdlog::level::warn);
+    }  
     std::string image_path = "images";
     mkdir_pics(image_path);
     std::string before_image_path = "images/before";
@@ -2817,9 +2818,10 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
       }
 
       if (nvinfer->alignment_type == 1 && nvinfer->alignment_parent == 1) {
+        // once a face was inferred, we won't infer it again until needed.
         is_exists = check_image_exists(object_meta);
         if (!is_exists){
-          spdlog::debug("face-{} already be infered.", object_meta->object_id);
+          spdlog::debug("face-{} already be inferred.", object_meta->object_id);
           continue;
         }
 
@@ -2845,10 +2847,10 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
           }
         }
         
-        // if is not a front face, we will drop this
+        // if it is not a front face, we will drop this
         front_face = is_front_face(face);
         if (!front_face){
-          spdlog::debug("face-{} is not a front face.", object_meta->object_id);
+          spdlog::debug("face-{} is not a front face won't be inferred.", object_meta->object_id);
           continue;
         }
       }
@@ -2895,36 +2897,6 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
         batch->conv_buf = conv_gst_buf;
       }
       idx = batch->frames.size ();
-
-      /////////////////////////////////////// insert here start
-
-      // gdouble ratio = 1;
-      // gint width = object_meta->rect_params.width;
-      // gint height = object_meta->rect_params.height;
-      // if(object_meta->unique_component_id == 2 && nvinfer->alignment_type==2) {
-      //   auto start = std::chrono::system_clock::now();
-      //   if (get_converted_mat (nvinfer,in_surf, idx, &object_meta->rect_params,ratio, width,height) != GST_FLOW_OK) {
-      //       continue;
-      //   }
-
-      //   auto end = std::chrono::system_clock::now();
-      //   std::cout << "get convert surf and matrix time usage:"<<std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us" << std::endl;
-        
-      //   char yuv_name[100] = "";
-      //   sprintf(yuv_name, "images/a-%d.png", count_num++);  
-      //   cv::imwrite(yuv_name, *nvinfer->cvmat);
-
-      //   auto end_2 = std::chrono::system_clock::now();
-      //   std::cout << "save img to local time usage:"<<std::chrono::duration_cast<std::chrono::microseconds>(end_2 - end).count() << "us" << std::endl;
-        
-      
-      // }
-      
-      // gpu_conv_test(nvinfer, nvinfer->inter_buf, object_meta->object_id);
-      
-
-
-      //////////////////////////////////////////////////end
   
       /* Crop, scale and convert the buffer. */
       if (get_converted_buffer (nvinfer, in_surf,
@@ -2955,6 +2927,7 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
           frame_meta->batch_id);
       batch->frames.push_back (frame);
 
+      // if user-meta was attached to object-meta, should be extracted here
       if (nvinfer->alignment_parent == 2){
         if (nvinfer->alignment_type == 2){
           try

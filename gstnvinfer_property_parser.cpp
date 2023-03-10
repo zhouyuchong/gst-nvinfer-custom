@@ -446,6 +446,11 @@ gst_nvinfer_parse_other_attribute (GstNvInfer * nvinfer,
         group_name, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_PICS,
         &error);
     CHECK_ERROR (error);
+  } else if (!g_strcmp0 (key, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_DEBUG_LEVEL)) {
+    nvinfer->alignment_debug_level = g_key_file_get_integer (key_file,
+        group_name, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_DEBUG_LEVEL,
+        &error);
+    CHECK_ERROR (error);
   } else if (!g_strcmp0 (key, CONFIG_GROUP_INFER_GIE_ID_FOR_OPERATION)) {
     if ((*nvinfer->is_prop_set)[PROP_OPERATE_ON_GIE_ID] ||
         (*nvinfer->is_prop_set)[PROP_OPERATE_ON_CLASS_IDS])

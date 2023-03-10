@@ -71,6 +71,7 @@ enum
   PROP_ALIGNMENT_TYPE,
   PROP_ALIGNMENT_PARENT,
   PROP_ALIGNMENT_PICS,
+  PROP_ALIGNMENT_DEBUG_LEVEL,
   PROP_OPERATE_ON_CLASS_IDS,
   PROP_FILTER_OUT_CLASS_IDS,
   PROP_MODEL_ENGINEFILE,
@@ -345,6 +346,7 @@ struct _GstNvInfer
   gint alignment_type;
   gint alignment_parent;
   gint alignment_pics;
+  gint alignment_debug_level;
   alignnamespace::Aligner aligner;
   extractornamespace::Extractor extractor;
 };

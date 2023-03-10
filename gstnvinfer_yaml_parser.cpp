@@ -306,6 +306,8 @@ gst_nvinfer_parse_other_attribute_yaml (GstNvInfer * nvinfer,
     nvinfer->alignment_parent = std::stoi(pair[1]);
   } else if (pair[0] == "alignment-pics"){
     nvinfer->alignment_pics = std::stoi(pair[1]);
+  } else if (pair[0] == "alignment-debug-level"){
+    nvinfer->alignment_debug_level = std::stoi(pair[1]);
   } else if (pair[0] == "classifier-async-mode") {
       nvinfer->classifier_async_mode = std::stoi(pair[1]);
   } else if (pair[0] == "classifier-type") {
