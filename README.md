@@ -59,3 +59,6 @@ License Plate
 Saved input NvBufSurface
 
 ![plate](plate.png)
+
+## TODO
+use npp for alignment
