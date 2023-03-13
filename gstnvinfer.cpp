@@ -1662,14 +1662,16 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M, int align_type, int id, cv:
     if (align_type == 1){
       cv::Mat transfer_mat = M(cv::Rect(0, 0, 3, 2));
       cv::warpAffine(whole_frame, frame, transfer_mat, cv::Size(112, 112), 1, 0, 0);
-    }
-
-    else if (align_type == 2){
+    } else if (align_type == 2){
       cv::Mat frame_rgb = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
       cv::cvtColor(whole_frame, frame_rgb, CV_RGBA2RGB);
-      cv::Mat transfer_mat = M(cv::Rect(0, 0, 3, 2));
-      cv::warpAffine(frame_rgb, frame, transfer_mat, cv::Size(94, 24), 1, 0, 0);
+      cv::warpPerspective(frame_rgb, frame, M, cv::Size(94, 24), 2, 1, 0);
+    } else if (align_type == 3){
+      cv::Mat frame_rgb = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
+      cv::cvtColor(whole_frame, frame_rgb, CV_RGBA2RGB);
+      cv::warpPerspective(frame_rgb, frame, M, cv::Size(160, 48), 2, 1, 0);
     }
+
     auto CheckPoint_alignment = std::chrono::system_clock::now();
     spdlog::debug("Alignment finished, time cost: {} us.", std::chrono::duration_cast<std::chrono::microseconds>(CheckPoint_alignment - CheckPoint_d2h).count());
     size_t sizeInBytes = surface->surfaceList[frameIndex].dataSize;
@@ -2175,7 +2177,14 @@ convert_batch_and_push_to_input_thread_plate_alignment (GstNvInfer *nvinfer,
 
   cv::Mat dst(4,2,CV_32FC1, plate);
   memcpy(dst.data, plate, 2 * 4 * sizeof(float));
-  cv::Mat M = nvinfer->aligner.AlignPlate(dst);
+  cv::Mat M;
+  if (nvinfer->alignment_type == 2) {
+    M = nvinfer->aligner.AlignPlate(dst, 1);
+  } else if (nvinfer->alignment_type == 3) {
+    M = nvinfer->aligner.AlignPlate(dst, 2);
+  }
+  
+  // std::cout<<"M=\n"<<M<<std::endl;
   align_preprocess(mem->surf, M, nvinfer->alignment_type, 0, whole_frame);
 
   // align_preprocess_new(nvinfer, mem->surf, M, nvinfer->alignment_type, frame_meta->frame_num, M);
@@ -2183,10 +2192,10 @@ convert_batch_and_push_to_input_thread_plate_alignment (GstNvInfer *nvinfer,
   
   if(nvinfer->alignment_pics == 2){
     if(nvinfer->alignment_parent == 2) {
-      save_aligned_pics(mem->surf, object_meta->parent->object_id, frame_meta->frame_num);
+      save_aligned_pics(mem->surf, object_meta->parent->object_id);
     }
     else {
-      save_aligned_pics(mem->surf, count_num, frame_meta->frame_num);
+      save_aligned_pics(mem->surf, count_num);
       count_num = count_num + 1;
     }
   }
@@ -2709,7 +2718,7 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
           if (nvinfer->alignment_type == 1){
             nvinfer->extractor.facelmks(l_user, face_res);
           }
-          if (nvinfer->alignment_type == 2){
+          if (nvinfer->alignment_type == 2 || nvinfer->alignment_type == 3){
             try
             {
               lmk_flag = nvinfer->extractor.platelmks(l_user, plate_res);
@@ -2929,7 +2938,7 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
 
       // if user-meta was attached to object-meta, should be extracted here
       if (nvinfer->alignment_parent == 2){
-        if (nvinfer->alignment_type == 2){
+        if (nvinfer->alignment_type == 2 or nvinfer->alignment_type == 3){
           try
           {
             /* code */
@@ -2954,7 +2963,7 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
         conv_gst_buf = nullptr;
         nvinfer->tmp_surf.numFilled = 0;
       }
-      else if (batch->frames.size () == nvinfer->max_batch_size && nvinfer->alignment_type ==2 && lmk_flag) {
+      else if (batch->frames.size () == nvinfer->max_batch_size && (nvinfer->alignment_type ==2 || nvinfer->alignment_type == 3) && lmk_flag) {
         if (!convert_batch_and_push_to_input_thread_plate_alignment (nvinfer, batch.get(), memory, frame_meta, object_meta, &object_meta->rect_params, plate_res)) {
           return GST_FLOW_ERROR;
         }

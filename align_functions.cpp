@@ -18,11 +18,18 @@ float standard_plate[4][2] = {
 			{94.0f, 24.0f}
 		};
 
+float standard_plate_lpr3[4][2] = {
+            {0.0f, 0.0f},
+			{160.0f, 0.0f},
+			{0.0f, 48.0f},
+			{160.0f, 48.0f}
+		};
+
 namespace alignnamespace {
 class Aligner::Impl {
 public:
 	cv::Mat AlignFace(const cv::Mat& dst);
-	cv::Mat AlignPlate(const cv::Mat& dst);
+	cv::Mat AlignPlate(const cv::Mat& dst, int model_type);
 
 
 private:
@@ -50,8 +57,8 @@ cv::Mat Aligner::AlignFace(const cv::Mat & dst) {
 	return impl_->AlignFace(dst);
 }
 
-cv::Mat Aligner::AlignPlate(const cv::Mat & dst) {
-	return impl_->AlignPlate(dst);
+cv::Mat Aligner::AlignPlate(const cv::Mat & dst, int model_type) {
+	return impl_->AlignPlate(dst, model_type);
 }
 
 cv::Mat Aligner::Impl::AlignFace(const cv::Mat & dst) {
@@ -64,14 +71,23 @@ cv::Mat Aligner::Impl::AlignFace(const cv::Mat & dst) {
 	return M;
 }
 
-cv::Mat Aligner::Impl::AlignPlate(const cv::Mat & dst) {
-	cv::Mat src(4,2,CV_32FC1, standard_plate);
-    memcpy(src.data, standard_plate, 2 * 4 * sizeof(float));
-	// std::cout << "start align face." << std::endl;
-    cv::Mat M= SimilarTransform(dst, src);
-	// std::cout << "start align plate." << std::endl;
-    // std::cout << "end align face." << std::endl;
-	return M;
+cv::Mat Aligner::Impl::AlignPlate(const cv::Mat & dst, int model_type) {
+    if(model_type == 1) {
+        cv::Mat src(4,2,CV_32FC1, standard_plate);
+        memcpy(src.data, standard_plate, 2 * 4 * sizeof(float));
+        // std::cout << "start align face." << std::endl;
+        cv::Mat M= cv::getPerspectiveTransform(dst, src);
+        // cv::Mat M= SimilarTransform(dst, src);
+        // std::cout << "start align plate." << std::endl;
+        // std::cout << "end align face." << std::endl;
+        return M;
+    } else if (model_type == 2) {
+        cv::Mat src(4,2,CV_32FC1, standard_plate_lpr3);
+        memcpy(src.data, standard_plate_lpr3, 2 * 4 * sizeof(float));
+        cv::Mat M= cv::getPerspectiveTransform(dst, src);
+        return M;
+    } 
+	
 }
 
 cv::Mat Aligner::Impl::MeanAxis0(const cv::Mat & src) {

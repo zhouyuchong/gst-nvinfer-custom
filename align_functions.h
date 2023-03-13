@@ -11,7 +11,7 @@ public:
 	~Aligner();
 
 	cv::Mat AlignFace(const cv::Mat & dst);
-	cv::Mat AlignPlate(const cv::Mat & dst);
+	cv::Mat AlignPlate(const cv::Mat & dst, int model_type);
 	
 private:
 	class Impl;
