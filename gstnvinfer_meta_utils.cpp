@@ -493,7 +493,7 @@ attach_tensor_output_meta (GstNvInfer *nvinfer, GstMiniObject * tensor_out_objec
     meta->gpu_id = nvinfer->gpu_id;
     meta->priv_data = gst_mini_object_ref (tensor_out_object);
     meta->network_info = nvinfer->network_info;
-    meta->maintain_aspect_ratio = nvinfer->maintain_aspect_ratio;
+    //meta->maintain_aspect_ratio = nvinfer->maintain_aspect_ratio;
 
     for (unsigned int i = 0; i < meta->num_output_layers; i++) {
       NvDsInferLayerInfo & info = meta->output_layers_info[i];
