@@ -8,7 +8,7 @@
 # license agreement from NVIDIA Corporation is strictly prohibited.
 #################################################################################
 
-CUDA_VER?=
+CUDA_VER?=10.2
 ifeq ($(CUDA_VER),)
   $(error "CUDA_VER is not set")
 endif
@@ -20,13 +20,13 @@ SRCS:= gstnvinfer.cpp  gstnvinfer_allocator.cpp gstnvinfer_property_parser.cpp \
 INCS:= $(wildcard *.h)
 LIB:=libnvdsgst_infer.so
 
-NVDS_VERSION:=6.1
+NVDS_VERSION:=6.0
 
-CFLAGS+= -fPIC -std=c++11 -DDS_VERSION=\"6.1.0\" \
+CFLAGS+= -fPIC -std=c++11 -DDS_VERSION=\"6.0\" \
 	 -I /usr/local/cuda-$(CUDA_VER)/include \
-	 -I /opt/nvidia/deepstream/deepstream-6.1/sources/includes \
-	 -I /opt/nvidia/deepstream/deepstream-6.1/sources/gst-plugins/gst-nvdspreprocess/include \
-	 -I /opt/nvidia/deepstream/deepstream-6.1/sources/libs/nvdsinfer -DNDEBUG
+	 -I /opt/nvidia/deepstream/deepstream-6.0/sources/includes \
+	 -I /opt/nvidia/deepstream/deepstream-6.0/sources/gst-plugins/gst-nvdspreprocess/include \
+	 -I /opt/nvidia/deepstream/deepstream-6.0/sources/libs/nvdsinfer -DNDEBUG
 
 -D_GLIBCXX_USE_CXX11_ABI=0
 CFLAGS+=-I /usr/include/opencv4 
@@ -45,7 +45,7 @@ LIBS+= -L$(LIB_INSTALL_DIR) -lnvdsgst_helper -lnvdsgst_meta -lnvds_meta \
 
 OBJS:= $(SRCS:.cpp=.o)
 
-PKGS:= gstreamer-1.0 gstreamer-base-1.0 gstreamer-video-1.0 /usr/lib/x86_64-linux-gnu/pkgconfig/opencv4.pc
+PKGS:= gstreamer-1.0 gstreamer-base-1.0 gstreamer-video-1.0 /usr/lib/aarch64-linux-gnu/pkgconfig/opencv.pc
 CFLAGS+=$(shell pkg-config --cflags $(PKGS))
 LIBS+=$(shell pkg-config --libs $(PKGS))
 

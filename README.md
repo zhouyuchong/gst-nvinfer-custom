@@ -1,3 +1,10 @@
+<!--
+ * @Author: zhouyuchong
+ * @Date: 2023-10-30 14:43:57
+ * @Description: 
+ * @LastEditors: zhouyuchong
+ * @LastEditTime: 2023-10-30 15:35:39
+-->
 # Custom gst-nvinfer (DEMO)
 This is a custom gst-nvinfer plugin to do some preprocess.
 
@@ -17,9 +24,11 @@ If want to use other models, codes in `tensor_extractor.cpp` should be modified 
 1. set cuda environment
 
 ```
-export CUDA_VER=11.6
+export CUDA_VER=10.2
 ```
 2. compile Makefile
+
+make sure all path & version in Makefile is correct.
 
 ```
 make
@@ -43,11 +52,6 @@ use kyewords
   + 1: frame-meta
   + 2: object-meta
 + alignment-pics: save pictures or not
-+ alignment-debug-level: spdlog debug level
-  + 0:None
-  + 1:info
-  + 2:debug
-  + 3:trace
 
 
 Example

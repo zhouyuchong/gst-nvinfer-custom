@@ -5,7 +5,6 @@
 #include "gstnvdsmeta.h"
 #include "gstnvdsinfer.h"
 #include "opencv2/opencv.hpp"
-#include "spdlog/spdlog.h"
 
 #define CLIP(a, min, max) (MAX(MIN(a, max), min))
 #define CONF_THRESH 0.1

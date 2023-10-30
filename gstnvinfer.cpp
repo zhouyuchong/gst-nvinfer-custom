@@ -27,7 +27,6 @@
 #include <tuple>
 #include <opencv2/opencv.hpp>
 #include <opencv2/imgproc/types_c.h>
-#include <nppi.h>
 #include <unistd.h>
 
 #include "gst-nvevent.h"
@@ -1652,10 +1651,8 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M, int align_type, int id, cv:
         surface->surfaceList[frameIndex].dataSize,
         cudaMemcpyDeviceToHost);
     auto CheckPoint_d2h = std::chrono::system_clock::now();
-    spdlog::debug("Copy mem from Device to Host time cost: {} us.", std::chrono::duration_cast<std::chrono::microseconds>(CheckPoint_d2h - start).count());
 
     size_t frame_step = surface->surfaceList[frameIndex].pitch;
-    spdlog::trace("Nvsurface colorformat = {}.", surface->surfaceList[frameIndex].colorFormat);
 
     cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC3, src_data, frame_step);
     
@@ -1673,14 +1670,12 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M, int align_type, int id, cv:
     }
 
     auto CheckPoint_alignment = std::chrono::system_clock::now();
-    spdlog::debug("Alignment finished, time cost: {} us.", std::chrono::duration_cast<std::chrono::microseconds>(CheckPoint_alignment - CheckPoint_d2h).count());
     size_t sizeInBytes = surface->surfaceList[frameIndex].dataSize;
     cudaMemcpy((void *)surface->surfaceList[frameIndex].dataPtr,
         frame.ptr(0),
         sizeInBytes,
         cudaMemcpyHostToDevice);  
     auto CheckPoint_h2d = std::chrono::system_clock::now();
-    spdlog::debug("Copy mem from Host to Device time cost: {} us.", std::chrono::duration_cast<std::chrono::microseconds>(CheckPoint_h2d - CheckPoint_alignment).count());
     cudaFreeHost(src_data);
   }
 }
@@ -1772,7 +1767,6 @@ get_images(NvBufSurface * surface, NvDsObjectMeta *object_meta, float pic_width,
         surface->surfaceList[frameIndex].dataSize,
         cudaMemcpyDeviceToHost);
     auto end = std::chrono::system_clock::now();
-    spdlog::debug("Copy background image mem frome Device to Host time cost: {} us.", std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
     size_t frame_step = surface->surfaceList[frameIndex].pitch;
 
     // printf("colorformat =%d\n", surface->surfaceList[frameIndex].colorFormat);
@@ -1834,7 +1828,6 @@ save_aligned_pics(NvBufSurface * surface, int track_id){
         surface->surfaceList[frameIndex].dataSize,
         cudaMemcpyDeviceToHost);
     auto end = std::chrono::system_clock::now();
-    spdlog::debug("Aligned image copy from Device to Host, time cost: {} us.", std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
     size_t frame_step = surface->surfaceList[frameIndex].pitch;
 
     cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC3, src_data, frame_step);
@@ -1842,7 +1835,6 @@ save_aligned_pics(NvBufSurface * surface, int track_id){
     sprintf(img_name, "images/aligned/alignment-%d.png", track_id);  
     cv::imwrite(img_name, frame); 
     auto end_save = std::chrono::system_clock::now();
-    spdlog::debug("Aligned image be saved to local, time cost: {} us.", std::chrono::duration_cast<std::chrono::microseconds>(end_save - end).count());
 
     cudaFreeHost(src_data);
   }
@@ -1999,12 +1991,10 @@ mkdir_pics(const std::string &output_path){
   if (access(output_path.c_str(), 0) == -1) {
       // mkdir(output_path.c_str(),S_IRUSR | S_IWUSR | S_IXUSR | S_IRWXG | S_IRWXO);
       system(("mkdir "+output_path).c_str());
-      spdlog::info("{} create.", output_path);
   }
   else {
       system(("rm -rf "+output_path).c_str());
       system(("mkdir "+output_path).c_str());
-      spdlog::info("{} recover create.", output_path);
   }
 }
 
@@ -2047,7 +2037,6 @@ convert_batch_and_push_to_input_thread_face_alignment (GstNvInfer *nvinfer,
   sprintf(img_name, "images/before/origin-%d.png", object_meta->object_id);  
   cv::imwrite(img_name, cropped); 
   auto CheckPoint_img = std::chrono::system_clock::now();
-  spdlog::debug("Image face-{} save to local time cost: {} us.",object_meta->object_id, std::chrono::duration_cast<std::chrono::microseconds>(CheckPoint_img - start).count());
 
   if (batch->frames.size() > 0) {
     /* Batched tranformation. */
@@ -2666,15 +2655,6 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
   float face[5][2]={0};
 
   if (nvinfer->alignment_pics && INIT_SIGNAL){
-    if(nvinfer->alignment_debug_level == 3){
-    spdlog::set_level(spdlog::level::trace);
-    } else if(nvinfer->alignment_debug_level == 2) {
-      spdlog::set_level(spdlog::level::debug);
-    } else if(nvinfer->alignment_debug_level == 1) {
-      spdlog::set_level(spdlog::level::info);
-    } else if(nvinfer->alignment_debug_level == 0) {
-      spdlog::set_level(spdlog::level::warn);
-    }  
     std::string image_path = "images";
     mkdir_pics(image_path);
     std::string before_image_path = "images/before";
@@ -2726,7 +2706,6 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
             catch(const std::exception& e)
             {
               lmk_flag = false;
-              spdlog::debug("Fail to decode tensor.");
             }
           }
         }
@@ -2830,7 +2809,6 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
         // once a face was inferred, we won't infer it again until needed.
         is_exists = check_image_exists(object_meta);
         if (!is_exists){
-          spdlog::debug("face-{} already be inferred.", object_meta->object_id);
           continue;
         }
 
@@ -2859,7 +2837,6 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
         // if it is not a front face, we will drop this
         front_face = is_front_face(face);
         if (!front_face){
-          spdlog::debug("face-{} is not a front face won't be inferred.", object_meta->object_id);
           continue;
         }
       }
