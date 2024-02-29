@@ -300,6 +300,8 @@ gst_nvinfer_parse_other_attribute_yaml (GstNvInfer * nvinfer,
             val);
         goto done;
     }
+  } else if (pair[0] == "enable-landmark"){
+    nvinfer->enable_landmark = std::stoi(pair[1]);
   } else if (pair[0] == "alignment-type"){
     nvinfer->alignment_type = std::stoi(pair[1]);
   } else if (pair[0] == "alignment-parent"){

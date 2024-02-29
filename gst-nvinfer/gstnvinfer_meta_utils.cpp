@@ -11,6 +11,9 @@
 
 #include <cmath>
 #include <cstring>
+#include <sstream>
+#include <vector>
+#include <string>
 #include "gstnvinfer_meta_utils.h"
 
 static inline int
@@ -122,10 +125,38 @@ attach_metadata_detector (GstNvInfer * nvinfer, GstMiniObject * tensor_out_objec
       rect_params.border_color = color_params.border_color;
     }
 
-    if (obj.label)
+    if (obj.label && !nvinfer->enable_landmark){
       g_strlcpy (obj_meta->obj_label, obj.label, MAX_LABEL_SIZE);
-    /* display_text requires heap allocated memory. */
-    text_params.display_text = g_strdup (obj.label);
+      /* display_text requires heap allocated memory. */
+      text_params.display_text = g_strdup (obj.label);
+    } else if (obj.label && nvinfer->enable_landmark) {
+      std::vector<std::string> tokens;
+      std::stringstream ss(obj.label);
+      std::string token;
+      while (std::getline(ss, token, ',')) {
+          token.erase(std::remove_if(token.begin(), token.end(), isspace), token.end());
+          tokens.push_back(token);
+      }
+      g_strlcpy (obj_meta->obj_label, tokens[0].c_str(), MAX_LABEL_SIZE);
+      text_params.display_text = g_strdup (tokens[0].c_str());
+      // 0->numHolder
+      obj_meta->misc_obj_info[0] = std::stoll(tokens[1]);
+      unsigned int totalLoop = static_cast<int>(ceil(static_cast<float>(tokens.size())/2/2));
+      // format all landmarks
+      for (unsigned int i = 2; i < tokens.size(); i++) {
+        if (tokens[i].length()<std::stoi(tokens[1])) {
+          tokens[i] = std::string((std::stoi(tokens[1])-tokens[i].length()), '0') + tokens[i];
+        }
+      }
+      for (unsigned int i = 1; i<totalLoop+1; i++) {
+        std::string formattedString;
+        for (unsigned int j=0;j<4;j++){
+          formattedString += tokens[2+j+4*(i-1)];
+        }
+        obj_meta->misc_obj_info[i] = std::stoll(formattedString);
+      }
+    }
+
     /* Display text above the left top corner of the object. */
     text_params.x_offset = rect_params.left;
     text_params.y_offset = rect_params.top - 10;

@@ -68,6 +68,7 @@ enum
   PROP_PROCESS_MODE,
   PROP_CONFIG_FILE_PATH,
   PROP_OPERATE_ON_GIE_ID,
+  PROP_OUTPUT_TYPE,
   PROP_ALIGNMENT_TYPE,
   PROP_ALIGNMENT_PARENT,
   PROP_ALIGNMENT_PICS,
@@ -343,6 +344,7 @@ struct _GstNvInfer
   // Host buffer to store RGB data for use by algorithm
   void *host_rgb_buf;
 
+  gint enable_landmark;
   gint alignment_type;
   gint alignment_parent;
   gint alignment_pics;

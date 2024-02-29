@@ -428,6 +428,11 @@ gst_nvinfer_parse_other_attribute (GstNvInfer * nvinfer,
           nvinfer->max_input_object_height);
       goto done;
     }
+  } else if (!g_strcmp0 (key, CONFIG_GROUP_INFER_OUTPUT_ENABLE_LANDMARK)) {
+    nvinfer->enable_landmark = g_key_file_get_integer (key_file,
+        group_name, CONFIG_GROUP_INFER_OUTPUT_ENABLE_LANDMARK,
+        &error);
+    CHECK_ERROR (error);
   } else if (!g_strcmp0 (key, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_TYPE)) {
     if ((*nvinfer->is_prop_set)[PROP_OPERATE_ON_GIE_ID] ||
         (*nvinfer->is_prop_set)[PROP_OPERATE_ON_CLASS_IDS])

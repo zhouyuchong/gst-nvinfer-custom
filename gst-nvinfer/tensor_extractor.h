@@ -1,3 +1,10 @@
+/*
+ * @Author: zhouyuchong
+ * @Date: 2024-02-26 14:51:58
+ * @Description: 
+ * @LastEditors: zhouyuchong
+ * @LastEditTime: 2024-02-27 10:57:30
+ */
 #ifndef _DAMONZZZ_EXTRACTOR_H_
 #define _DAMONZZZ_EXTRACTOR_H_
 
@@ -5,7 +12,6 @@
 #include "gstnvdsmeta.h"
 #include "gstnvdsinfer.h"
 #include "opencv2/opencv.hpp"
-#include "spdlog/spdlog.h"
 
 #define CLIP(a, min, max) (MAX(MIN(a, max), min))
 #define CONF_THRESH 0.1
