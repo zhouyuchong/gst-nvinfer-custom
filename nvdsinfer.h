@@ -158,8 +158,6 @@ typedef struct
 
   unsigned int numLmks;
   unsigned int landmark[10];
-  unsigned int numHolder;
-
 } NvDsInferObjectDetectionInfo;
 
 /**

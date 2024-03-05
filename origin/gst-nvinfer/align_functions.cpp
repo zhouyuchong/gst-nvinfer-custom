@@ -1,5 +1,4 @@
 #include "align_functions.h"
-#include <iostream>
 
 // default_array use the norm landmarks arcface_src from
 // https://github.com/deepinsight/insightface/blob/master/python-package/insightface/utils/face_align.py
@@ -225,3 +224,5 @@ cv::Mat Aligner::Impl::SimilarTransform(const cv::Mat & src, const cv::Mat & dst
     }
 
 }
+
+

@@ -14,7 +14,7 @@
 #include <sstream>
 #include <vector>
 #include <string>
-#include "gstnvinfer_meta_utils.h"
+#include "gstnvinfer_meta_utils.h" 
 
 static inline int
 get_element_size (NvDsInferDataType data_type)
@@ -125,11 +125,11 @@ attach_metadata_detector (GstNvInfer * nvinfer, GstMiniObject * tensor_out_objec
       rect_params.border_color = color_params.border_color;
     }
 
-    if (obj.label && !nvinfer->enable_landmark){
+    if (obj.label && !nvinfer->enable_output_landmark){
       g_strlcpy (obj_meta->obj_label, obj.label, MAX_LABEL_SIZE);
       /* display_text requires heap allocated memory. */
       text_params.display_text = g_strdup (obj.label);
-    } else if (obj.label && nvinfer->enable_landmark) {
+    } else if (obj.label && nvinfer->enable_output_landmark) {
       std::vector<std::string> tokens;
       std::stringstream ss(obj.label);
       std::string token;
