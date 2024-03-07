@@ -97,7 +97,9 @@ static GQuark _dsmeta_quark = 0;
 /* Custom Alignment */
 #define DEFAULT_ALIGNMENT_TYPE -1
 #define DEFAULT_OUTPUT_LMKS 0
-#define DEFAULT_ALIGNMENT_PICS 0
+#define DEFAULT_ALIGNMENT_PICS ""
+#define DEFAULT_ALIGNMENT_NET_WIDTH 0
+#define DEFAULT_ALIGNMENT_NET_HEIGHT 0
 
 
 /* By default NVIDIA Hardware allocated memory flows through the pipeline. We
@@ -356,12 +358,11 @@ gst_nvinfer_class_init (GstNvInferClass * klass)
               GST_PARAM_MUTABLE_READY)));
 
   g_object_class_install_property (gobject_class, PROP_ALIGNMENT_PICS,
-      g_param_spec_int ("save-pics", "",
-          "flag for saving pics or not.\n"
-          "\t\t\tSet to 1 to save pics.",
-          -1, G_MAXINT, DEFAULT_ALIGNMENT_PICS,
+      g_param_spec_string ("alignment-pic-path", "Save Image Path",
+          "Path",
+          DEFAULT_ALIGNMENT_PICS,
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
-              GST_PARAM_MUTABLE_READY)));
+              GST_PARAM_MUTABLE_PLAYING)));
 
   /** install signal MODEL_UPDATED */
   gst_nvinfer_signals[SIGNAL_MODEL_UPDATED] =
@@ -426,7 +427,7 @@ gst_nvinfer_init (GstNvInfer * nvinfer)
   /* Custom Alignment*/
   nvinfer->enable_output_landmark = DEFAULT_OUTPUT_LMKS;
   nvinfer->alignment_type = DEFAULT_ALIGNMENT_TYPE;
-  nvinfer->alignment_pic_path = DEFAULT_ALIGNMENT_PICS;
+  nvinfer->alignment_pic_path = g_strdup (DEFAULT_ALIGNMENT_PICS);
 
   /* Create processing lock and condition for synchronization.*/
   g_mutex_init (&nvinfer->process_lock);
@@ -455,6 +456,8 @@ gst_nvinfer_finalize (GObject * object)
   delete nvinfer->filter_out_class_ids;
 
   delete DS_NVINFER_IMPL(nvinfer);
+
+  g_free(nvinfer->alignment_pic_path);
 
   G_OBJECT_CLASS (parent_class)->finalize (object);
 }
@@ -598,7 +601,7 @@ gst_nvinfer_set_property (GObject * object, guint prop_id,
       nvinfer->alignment_type = g_value_get_int (value);
       break;
     case PROP_ALIGNMENT_PICS:
-      nvinfer->alignment_pic_path = g_value_get_int (value);
+      nvinfer->alignment_pic_path = g_value_dup_string (value);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -689,7 +692,7 @@ gst_nvinfer_get_property (GObject * object, guint prop_id,
       g_value_set_int (value, nvinfer->alignment_type);
       break;
     case PROP_ALIGNMENT_PICS:
-      g_value_set_int (value, nvinfer->alignment_pic_path);
+      g_value_set_string (value, nvinfer->alignment_pic_path);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -1467,7 +1470,8 @@ convert_batch_and_push_to_input_thread (GstNvInfer *nvinfer,
 }
 
 static std::tuple<cv::Mat, cv::Mat>
-get_images(NvBufSurface * surface, NvDsObjectMeta *object_meta, float pic_width, float pic_height, float matrix[][2]=NULL){ 
+get_images(GstNvInfer *nvinfer, NvDsObjectMeta *object_meta, float pic_width, float pic_height, float matrix[][2]=NULL){ 
+  NvBufSurface * surface = &nvinfer->tmp_surf;
   for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
     gint frame_width = (gint)surface->surfaceList[frameIndex].width;
     gint frame_height = (gint)surface->surfaceList[frameIndex].height;
@@ -1506,10 +1510,13 @@ get_images(NvBufSurface * surface, NvDsObjectMeta *object_meta, float pic_width,
     int y1 = int(CLIP(object_meta->rect_params.top - pic_height, 0, out_mat.size().height));
     int x2 = int(CLIP(object_meta->rect_params.left + object_meta->rect_params.width + pic_width, 0, out_mat.size().width));
     int y2 = int(CLIP(object_meta->rect_params.top + object_meta->rect_params.height + pic_height, 0, out_mat.size().height));
+
+    cv::Mat whole_frame;
+    out_mat.copyTo(whole_frame);
+
     // Draw bbox and lmk points
     // cv::rectangle(out_mat,cvPoint(int(object_meta->rect_params.left),int(object_meta->rect_params.top)),cvPoint(int(object_meta->rect_params.left + object_meta->rect_params.width),int(object_meta->rect_params.top + object_meta->rect_params.height)),cv::Scalar(255,0,0),1,1,0);
     // for(int i=0;i<5;i++){
-    //   // std::cout<<matrix[i][0]<<" "<<matrix[i][1]<<std::endl;
     //   cv::Point centerCircle1(matrix[i][0], matrix[i][1]);
     //   int radiusCircle = 1;
     //   cv::Scalar colorCircle1(0, 0, 255); // (B, G, R)
@@ -1520,16 +1527,14 @@ get_images(NvBufSurface * surface, NvDsObjectMeta *object_meta, float pic_width,
     cv::Rect rect(x1, y1, (x2-x1), (y2-y1));                              
 	  cv::Mat roiImage = out_mat(rect);
     cv::Mat cropped;
-    cv::Mat whole_frame;
-    // // Copy the data into new matrix
     roiImage.copyTo(cropped);
-    out_mat.copyTo(whole_frame);
+    
     cudaFreeHost(src_data);
     return std::make_tuple(cropped, whole_frame);
   }
 }
 
-static void
+static cv::Mat
 align_preprocess(NvBufSurface * surface, cv::Mat &M, int align_type, int id, cv::Mat &whole_frame){
   for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
     gint frame_width = (gint)surface->surfaceList[frameIndex].width;
@@ -1574,6 +1579,7 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M, int align_type, int id, cv:
         cudaMemcpyHostToDevice);  
     auto CheckPoint_h2d = std::chrono::system_clock::now();
     cudaFreeHost(src_data);
+    return frame;
   }
 }
 
@@ -1625,9 +1631,7 @@ convert_batch_and_push_to_input_thread_alignment (GstNvInfer *nvinfer,
   memcpy(dst.data, lmks, 2 * row * sizeof(float));
   cv::Mat M = nvinfer->aligner.Align(dst, nvinfer->alignment_type);
 
-  // get_images_new(&nvinfer->tmp_surf, object_meta, pic_width, pic_height, M);
-  std::tie(cropped, whole_frame) = get_images(&nvinfer->tmp_surf, object_meta, pic_width, pic_height, lmks);
-
+  std::tie(cropped, whole_frame) = get_images(nvinfer, object_meta, pic_width, pic_height, lmks);
 
   if (batch->frames.size() > 0) {
     /* Batched tranformation. */
@@ -1643,8 +1647,22 @@ convert_batch_and_push_to_input_thread_alignment (GstNvInfer *nvinfer,
     return FALSE;
   }
 
-  align_preprocess(mem->surf, M, nvinfer->alignment_type, object_meta->object_id, whole_frame);
-  
+  cv::Mat aligned;
+  cv::Mat resizedMat;
+  aligned = align_preprocess(mem->surf, M, nvinfer->alignment_type, object_meta->object_id, whole_frame);
+
+  if (strlen(nvinfer->alignment_pic_path)) {
+    char image_aligned_name[strlen(nvinfer->alignment_pic_path)+100];
+    char image_frame_name[strlen(nvinfer->alignment_pic_path)+100];
+    char image_origin_name[strlen(nvinfer->alignment_pic_path)+100];
+    sprintf(image_aligned_name, "%s/frame-%d:object-%d:aligned.png", nvinfer->alignment_pic_path, frame_meta->frame_num, object_meta->object_id);  
+    sprintf(image_frame_name, "%s/frame-%d:object-%d:frame.png", nvinfer->alignment_pic_path, frame_meta->frame_num, object_meta->object_id); 
+    sprintf(image_origin_name, "%s/frame-%d:object-%d:origin.png", nvinfer->alignment_pic_path, frame_meta->frame_num, object_meta->object_id); 
+    cv::imwrite(image_aligned_name, aligned); 
+    cv::imwrite(image_origin_name, cropped); 
+    cv::imwrite(image_frame_name, whole_frame); 
+  }
+
   LockGMutex locker (nvinfer->process_lock);
   /* Push the batch info structure in the processing queue and notify the output
    * thread that a new batch has been queued. */
@@ -2027,10 +2045,8 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
             for (unsigned int i=0; i < ARRAYSIZE; i++) {
               if (user_meta_data[i]) {
                 landmarks[i] = (float)user_meta_data[i];
-                std::cout<<landmarks[i]<<" ";
               }
             }                      
-            std::cout<<std::endl;
           }
         }
       }
@@ -2111,8 +2127,9 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
           frame_meta->batch_id);
       batch->frames.push_back (frame);
 
+
       /* Custom Alignment*/
-      if (batch->frames.size () == nvinfer->max_batch_size && nvinfer->alignment_type==3) {
+      if (batch->frames.size () == nvinfer->max_batch_size && nvinfer->alignment_type) {
         if (!convert_batch_and_push_to_input_thread_alignment (nvinfer, batch.get(), memory, frame_meta, object_meta, &object_meta->rect_params, landmarks)) {
           return GST_FLOW_ERROR;
         }

@@ -336,7 +336,7 @@ struct _GstNvInfer
 
   gint enable_output_landmark;
   gint alignment_type;
-  gint alignment_pic_path;
+  gchar * alignment_pic_path;
   alignnamespace::Aligner aligner;
 };
 

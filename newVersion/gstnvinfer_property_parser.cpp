@@ -522,9 +522,8 @@ gst_nvinfer_parse_other_attribute (GstNvInfer * nvinfer,
         &error);
     CHECK_ERROR (error);
   } else if (!g_strcmp0 (key, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_PICS)) {
-    nvinfer->alignment_pic_path = g_key_file_get_integer (key_file,
-        group_name, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_PICS,
-        &error);
+    nvinfer->alignment_pic_path = g_key_file_get_string (key_file, CONFIG_GROUP_PROPERTY,
+          CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_PICS, &error);
     CHECK_ERROR (error);
   } else {
       g_printerr ("Unknown or legacy key specified '%s' for group [%s]\n", key,

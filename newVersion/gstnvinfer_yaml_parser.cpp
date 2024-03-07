@@ -418,9 +418,7 @@ gst_nvinfer_parse_other_attribute_yaml (GstNvInfer * nvinfer,
   } else if (pair[0] == "alignment-type"){
     nvinfer->alignment_type = std::stoi(pair[1]);
   } else if (pair[0] == "alignment-pics-path"){
-    //TODO add path
-    // std::string values = itr->second.as<std::string>();
-    nvinfer->alignment_pic_path = std::stoi(pair[1]);
+    nvinfer->alignment_pic_path = strdup(pair[1].c_str());
   } else {
       g_printerr ("Unknown or legacy key specified '%s' for group property\n", pair[0].c_str());
     }
