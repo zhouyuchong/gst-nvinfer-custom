@@ -19,6 +19,8 @@
 #include <unordered_map>
 #include <vector>
 #include <memory>
+#include <opencv2/opencv.hpp>
+#include <opencv2/imgproc/types_c.h>
 
 #include "cuda_runtime_api.h"
 #include "nvbufsurftransform.h"

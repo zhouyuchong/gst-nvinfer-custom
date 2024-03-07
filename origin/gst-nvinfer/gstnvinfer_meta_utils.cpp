@@ -33,6 +33,26 @@ get_element_size (NvDsInferDataType data_type)
   }
 }
 
+/* copy function set by user. "data" holds a pointer to NvDsUserMeta*/
+static gpointer copy_user_meta(gpointer data, gpointer user_data)
+{
+  NvDsUserMeta *user_meta = (NvDsUserMeta *)data;
+  gint *src_user_metadata = (gint*)user_meta->user_meta_data;
+  gint *dst_user_metadata = (gint*)g_malloc0(ARRAYSIZE * sizeof(gint));
+  memcpy(dst_user_metadata, src_user_metadata, ARRAYSIZE * sizeof(gint));
+  return (gpointer)dst_user_metadata;
+}
+
+/* release function set by user. "data" holds a pointer to NvDsUserMeta*/
+static void release_user_meta(gpointer data, gpointer user_data)
+{
+  NvDsUserMeta *user_meta = (NvDsUserMeta *) data;
+  if(user_meta->user_meta_data) {
+    g_free(user_meta->user_meta_data);
+    user_meta->user_meta_data = NULL;
+  }
+}
+
 /**
  * Attach metadata for the detector. We will be adding a new metadata.
  */
@@ -140,38 +160,28 @@ attach_metadata_detector (GstNvInfer * nvinfer, GstMiniObject * tensor_out_objec
       }
       g_strlcpy (obj_meta->obj_label, tokens[0].c_str(), MAX_LABEL_SIZE);
       text_params.display_text = g_strdup (tokens[0].c_str());
-      // 创建两个数组，数组1为int类型（用来比较大小），数组2为string类型（用来传递存储）
-      int lmks[tokens.size()-1] = {0};
-      std::string lmks_string[tokens.size()-1];
-      // 解析并还原坐标 模型->视频比例
-      for (unsigned int i = 0; i < tokens.size()-1; ) {
-        lmks[i] = (std::stoi(tokens[i+1]) - frame.offset_left)/frame.scale_ratio_x + frame.roi_left;
-        lmks[i+1] = (std::stoi(tokens[i+2]) - frame.offset_top)/frame.scale_ratio_y + frame.roi_top;
+
+      NvDsUserMeta *user_meta = NULL;
+      NvDsMetaType user_meta_type = NVDS_USER_OBJECT_META_EXAMPLE;
+
+      /* Acquire NvDsUserMeta user meta from pool */
+      user_meta = nvds_acquire_user_meta_from_pool(batch_meta);
+      int array_size = 16;
+      gint *user_metadata = (gint*)g_malloc0(array_size * sizeof(gint));
+      for (unsigned int i=0; i < tokens.size()-1;) {
+        user_metadata[i] = (std::stoi(tokens[i+1]) - frame.offset_left)/frame.scale_ratio_x + frame.roi_left;
+        user_metadata[i+1] = (std::stoi(tokens[i+2]) - frame.offset_top)/frame.scale_ratio_y + frame.roi_top;
         i+=2;
       }
-      // 找出最大的坐标，取得位数
-      auto max = std::max_element(lmks, lmks + sizeof(lmks) / sizeof(lmks[0]));
-      int numHolder = static_cast<int>(ceil(std::log10(static_cast<double>(*max))));
-      // 先存位数都objmeta中
-      obj_meta->misc_obj_info[0] = numHolder;
-      // format all landmarks
-      for (unsigned int i = 0; i < tokens.size()-1; i++) {
-        std::string tmpLmksString = std::to_string(lmks[i]);
-        if (tmpLmksString.length() < numHolder) {
-          // 如果位数不够用0补齐
-          lmks_string[i] = std::string((numHolder-tmpLmksString.length()), '0') + tmpLmksString;
-        } else {
-          lmks_string[i] = tmpLmksString;
-        }
-      }
-      std::string formattedString;
-      for (unsigned int i = 0; i < tokens.size()-1; i++) {
-        formattedString += lmks_string[i];
-        if (i%4==3 || i==tokens.size()-2) {
-          obj_meta->misc_obj_info[i/4+1] = std::stoll(formattedString);
-          formattedString = "";
-        }
-      }
+      /* Set NvDsUserMeta below */
+      user_meta->user_meta_data = (void *)user_metadata;
+      user_meta->base_meta.meta_type = user_meta_type;
+      user_meta->base_meta.copy_func = (NvDsMetaCopyFunc)copy_user_meta;
+      user_meta->base_meta.release_func = (NvDsMetaReleaseFunc)release_user_meta;
+
+      /* We want to add NvDsUserMeta to frame level */
+      nvds_add_user_meta_to_obj(obj_meta, user_meta);
+
     }
 
     /* Display text above the left top corner of the object. */
