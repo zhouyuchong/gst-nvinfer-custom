@@ -428,29 +428,6 @@ gst_nvinfer_parse_other_attribute (GstNvInfer * nvinfer,
           nvinfer->max_input_object_height);
       goto done;
     }
-  } else if (!g_strcmp0 (key, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_TYPE)) {
-    if ((*nvinfer->is_prop_set)[PROP_OPERATE_ON_GIE_ID] ||
-        (*nvinfer->is_prop_set)[PROP_OPERATE_ON_CLASS_IDS])
-      return TRUE;
-    nvinfer->alignment_type = g_key_file_get_integer (key_file,
-        group_name, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_TYPE,
-        &error);
-    CHECK_ERROR (error);
-  } else if (!g_strcmp0 (key, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_PARENT)) {
-    nvinfer->alignment_parent = g_key_file_get_integer (key_file,
-        group_name, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_PARENT,
-        &error);
-    CHECK_ERROR (error);
-  } else if (!g_strcmp0 (key, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_PICS)) {
-    nvinfer->alignment_pics = g_key_file_get_integer (key_file,
-        group_name, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_PICS,
-        &error);
-    CHECK_ERROR (error);
-  } else if (!g_strcmp0 (key, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_DEBUG_LEVEL)) {
-    nvinfer->alignment_debug_level = g_key_file_get_integer (key_file,
-        group_name, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_DEBUG_LEVEL,
-        &error);
-    CHECK_ERROR (error);
   } else if (!g_strcmp0 (key, CONFIG_GROUP_INFER_GIE_ID_FOR_OPERATION)) {
     if ((*nvinfer->is_prop_set)[PROP_OPERATE_ON_GIE_ID] ||
         (*nvinfer->is_prop_set)[PROP_OPERATE_ON_CLASS_IDS])
@@ -528,6 +505,26 @@ gst_nvinfer_parse_other_attribute (GstNvInfer * nvinfer,
         goto done;
     }
     nvinfer->transform_params.transform_filter = (NvBufSurfTransform_Inter) val;
+  } 
+  /* Custom Alignment */
+  else if (!g_strcmp0 (key, CONFIG_GROUP_INFER_ENABLE_OUTPUT_LANDMARK)) {
+    nvinfer->enable_output_landmark = g_key_file_get_integer (key_file,
+        group_name, CONFIG_GROUP_INFER_ENABLE_OUTPUT_LANDMARK,
+        &error);
+    CHECK_ERROR (error);
+  } else if (!g_strcmp0 (key, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_TYPE)) {
+    // Only support SGIE
+    if ((*nvinfer->is_prop_set)[PROP_OPERATE_ON_GIE_ID] ||
+        (*nvinfer->is_prop_set)[PROP_OPERATE_ON_CLASS_IDS])
+      return TRUE;
+    nvinfer->alignment_type = g_key_file_get_integer (key_file,
+        group_name, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_TYPE,
+        &error);
+    CHECK_ERROR (error);
+  } else if (!g_strcmp0 (key, CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_PICS)) {
+    nvinfer->alignment_pic_path = g_key_file_get_string (key_file, CONFIG_GROUP_PROPERTY,
+          CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_PICS, &error);
+    CHECK_ERROR (error);
   } else {
       g_printerr ("Unknown or legacy key specified '%s' for group [%s]\n", key,
           CONFIG_GROUP_PROPERTY);

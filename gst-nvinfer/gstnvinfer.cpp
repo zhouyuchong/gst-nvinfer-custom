@@ -12,8 +12,6 @@
 #include <string.h>
 #include <sstream>
 #include <sys/time.h>
-#include <sys/stat.h>
-#include <unistd.h>
 #include <algorithm>
 #include <cassert>
 #include <condition_variable>
@@ -22,13 +20,6 @@
 #include <list>
 #include <thread>
 #include <vector>
-#include <iostream>
-#include <cmath>
-#include <tuple>
-#include <opencv2/opencv.hpp>
-#include <opencv2/imgproc/types_c.h>
-#include <nppi.h>
-#include <unistd.h>
 
 #include "gst-nvevent.h"
 #include "gstnvdsmeta.h"
@@ -45,11 +36,6 @@ using namespace gstnvinfer;
 using namespace nvdsinfer;
 
 GST_DEBUG_CATEGORY (gst_nvinfer_debug);
-
-//////////////////////insert 0 start 
-#define RGB_BYTES_PER_PIXEL 3
-
-
 #define GST_CAT_DEFAULT gst_nvinfer_debug
 
 #define INTERNAL_BUF_POOL_SIZE 3
@@ -102,20 +88,19 @@ static GQuark _dsmeta_quark = 0;
 #define DEFAULT_BATCH_SIZE 1
 #define DEFAULT_INTERVAL 0
 #define DEFAULT_OPERATE_ON_GIE_ID -1
-#define DEFAULT_ALIGNMENT_TYPE -1
-#define DEFAULT_ALIGNMENT_PARENT -1
-#define DEFAULT_ALIGNMENT_DEBUG_LEVEL 0
-#define DEFAULT_ALIGNMENT_PICS 0
 #define DEFAULT_GPU_DEVICE_ID 0
 #define DEFAULT_OUTPUT_WRITE_TO_FILE FALSE
 #define DEFAULT_OUTPUT_TENSOR_META FALSE
 #define DEFAULT_OUTPUT_INSTANCE_MASK FALSE
 #define DEFAULT_INPUT_TENSOR_META FALSE
 
-int INIT_SIGNAL = 1;
-int count_num = 0;
-int count_num_2 = 0;
-int count_num_3 = 0;
+/* Custom Alignment */
+#define DEFAULT_ALIGNMENT_TYPE 0
+#define DEFAULT_OUTPUT_LMKS 0
+#define DEFAULT_ALIGNMENT_PICS ""
+#define DEFAULT_ALIGNMENT_NET_WIDTH 0
+#define DEFAULT_ALIGNMENT_NET_HEIGHT 0
+
 
 /* By default NVIDIA Hardware allocated memory flows through the pipeline. We
  * will be processing on this type of memory only. */
@@ -143,6 +128,8 @@ G_DEFINE_TYPE (GstNvInfer, gst_nvinfer, GST_TYPE_BASE_TRANSFORM);
   } \
 } while (0)
 
+#define CLIP(a, min, max) (MAX(MIN(a, max), min))
+
 /* Implementation of the GObject/GstBaseTransform interfaces. */
 static void gst_nvinfer_finalize (GObject * object);
 static void gst_nvinfer_set_property (GObject * object, guint prop_id,
@@ -167,18 +154,6 @@ static void gst_nvinfer_reset_init_params (GstNvInfer * nvinfer);
 
 /* Create enum type for the process mode property. */
 #define GST_TYPE_NVDSINFER_PROCESS_MODE (gst_nvinfer_process_mode_get_type ())
-
-void proc(std::map<int, cv::Mat> cropped)
-{
-  while(1){
-    unsigned int microseconds = 1000;
-    int nSize = cropped.size();
-    std::cout << "size" << nSize << std::endl;
-    usleep(microseconds);
-  }
-  
-}
-
 
 static GType
 gst_nvinfer_process_mode_get_type (void)
@@ -291,38 +266,6 @@ gst_nvinfer_class_init (GstNvInferClass * klass)
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
               GST_PARAM_MUTABLE_READY)));
 
-  g_object_class_install_property (gobject_class, PROP_ALIGNMENT_TYPE,
-      g_param_spec_int ("alignment-type", "Alignment type",
-          "Align surfaces before feed into infer.\n"
-          "\t\t\tSet to 1 for face and to 2 for license plate.",
-          -1, G_MAXINT, DEFAULT_ALIGNMENT_TYPE,
-          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
-              GST_PARAM_MUTABLE_READY)));
-
-  g_object_class_install_property (gobject_class, PROP_ALIGNMENT_PARENT,
-      g_param_spec_int ("alignment-parent", "Usermeta data source",
-          "Indicates usermeta-data source.\n"
-          "\t\t\tSet to 1 for frame to 2 for object.",
-          -1, G_MAXINT, DEFAULT_ALIGNMENT_PARENT,
-          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
-              GST_PARAM_MUTABLE_READY)));
-
-  g_object_class_install_property (gobject_class, PROP_ALIGNMENT_DEBUG_LEVEL,
-      g_param_spec_int ("alignment-debug-level", "debug level",
-          "Indicates usermeta-data source.\n"
-          "\t\t\tSet to 1 for frame to 2 for object.",
-          -1, G_MAXINT, DEFAULT_ALIGNMENT_DEBUG_LEVEL,
-          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
-              GST_PARAM_MUTABLE_READY)));
-
-  g_object_class_install_property (gobject_class, PROP_ALIGNMENT_PICS,
-      g_param_spec_int ("save-pics", "",
-          "flag for saving pics or not.\n"
-          "\t\t\tSet to 1 to save pics.",
-          -1, G_MAXINT, DEFAULT_ALIGNMENT_PICS,
-          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
-              GST_PARAM_MUTABLE_READY)));
-
   g_object_class_install_property (gobject_class, PROP_OPERATE_ON_CLASS_IDS,
       g_param_spec_string ("infer-on-class-ids", "Operate on Class ids",
           "Operate on objects with specified class ids\n"
@@ -398,6 +341,29 @@ gst_nvinfer_class_init (GstNvInferClass * klass)
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
               GST_PARAM_MUTABLE_READY)));
 
+  g_object_class_install_property (gobject_class, PROP_OUTPUT_LMKS,
+      g_param_spec_int ("enable-output-landmark", "Enable output with landmarks by detector",
+          "Add landmarks into object metadata.\n"
+          "\t\t\tSet to 1 to enable.",
+          -1, G_MAXINT, DEFAULT_OUTPUT_LMKS,
+          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
+              GST_PARAM_MUTABLE_READY)));
+
+  g_object_class_install_property (gobject_class, PROP_ALIGNMENT_TYPE,
+      g_param_spec_int ("alignment-type", "Alignment type",
+          "Align surfaces before feed into infer.\n"
+          "\t\t\tSet to 1 for face and to 2 for license plate.",
+          -1, G_MAXINT, DEFAULT_ALIGNMENT_TYPE,
+          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
+              GST_PARAM_MUTABLE_READY)));
+
+  g_object_class_install_property (gobject_class, PROP_ALIGNMENT_PICS,
+      g_param_spec_string ("alignment-pic-path", "Save Image Path",
+          "Path",
+          DEFAULT_ALIGNMENT_PICS,
+          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
+              GST_PARAM_MUTABLE_PLAYING)));
+
   /** install signal MODEL_UPDATED */
   gst_nvinfer_signals[SIGNAL_MODEL_UPDATED] =
       g_signal_new ("model-updated",
@@ -449,21 +415,19 @@ gst_nvinfer_init (GstNvInfer * nvinfer)
       DEFAULT_BATCH_SIZE;
   nvinfer->interval = DEFAULT_INTERVAL;
   nvinfer->operate_on_gie_id = DEFAULT_OPERATE_ON_GIE_ID;
-
-  // custom properties
-  nvinfer->alignment_type = DEFAULT_ALIGNMENT_TYPE;
-  nvinfer->alignment_parent = DEFAULT_ALIGNMENT_PARENT;
-  nvinfer->alignment_pics = DEFAULT_ALIGNMENT_PICS;
-  nvinfer->alignment_debug_level = DEFAULT_ALIGNMENT_DEBUG_LEVEL;
   nvinfer->gpu_id = impl->m_InitParams->gpuID = DEFAULT_GPU_DEVICE_ID;
   nvinfer->is_prop_set = new std::vector < gboolean > (PROP_LAST, FALSE);
-  nvinfer->crop_data = new std::map<int, cv::Mat>;
 
   nvinfer->untracked_object_warn_pts = GST_CLOCK_TIME_NONE;
 
   /* Set the default pre-processing transform params. */
   nvinfer->transform_config_params.compute_mode = NvBufSurfTransformCompute_Default;
   nvinfer->transform_params.transform_filter = NvBufSurfTransformInter_Default;
+
+  /* Custom Alignment*/
+  nvinfer->enable_output_landmark = DEFAULT_OUTPUT_LMKS;
+  nvinfer->alignment_type = DEFAULT_ALIGNMENT_TYPE;
+  nvinfer->alignment_pic_path = g_strdup (DEFAULT_ALIGNMENT_PICS);
 
   /* Create processing lock and condition for synchronization.*/
   g_mutex_init (&nvinfer->process_lock);
@@ -492,6 +456,8 @@ gst_nvinfer_finalize (GObject * object)
   delete nvinfer->filter_out_class_ids;
 
   delete DS_NVINFER_IMPL(nvinfer);
+
+  g_free(nvinfer->alignment_pic_path);
 
   G_OBJECT_CLASS (parent_class)->finalize (object);
 }
@@ -550,18 +516,6 @@ gst_nvinfer_set_property (GObject * object, guint prop_id,
       break;
     case PROP_OPERATE_ON_GIE_ID:
       nvinfer->operate_on_gie_id = g_value_get_int (value);
-      break;
-    case PROP_ALIGNMENT_TYPE:
-      nvinfer->alignment_type = g_value_get_int (value);
-      break;
-    case PROP_ALIGNMENT_PARENT:
-      nvinfer->alignment_parent = g_value_get_int (value);
-      break;
-    case PROP_ALIGNMENT_PICS:
-      nvinfer->alignment_pics = g_value_get_int (value);
-      break;
-    case PROP_ALIGNMENT_DEBUG_LEVEL:
-      nvinfer->alignment_debug_level = g_value_get_int (value);
       break;
     case PROP_OPERATE_ON_CLASS_IDS:
     {
@@ -638,6 +592,17 @@ gst_nvinfer_set_property (GObject * object, guint prop_id,
       impl->m_InitParams->inputFromPreprocessedTensor =
           g_value_get_boolean (value);
       break;
+
+    /* Custom Alignment*/
+    case PROP_OUTPUT_LMKS:
+      nvinfer->enable_output_landmark = g_value_get_int (value);
+      break;
+    case PROP_ALIGNMENT_TYPE:
+      nvinfer->alignment_type = g_value_get_int (value);
+      break;
+    case PROP_ALIGNMENT_PICS:
+      nvinfer->alignment_pic_path = g_value_dup_string (value);
+      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -668,18 +633,6 @@ gst_nvinfer_get_property (GObject * object, guint prop_id,
       break;
     case PROP_OPERATE_ON_GIE_ID:
       g_value_set_int (value, nvinfer->operate_on_gie_id);
-      break;
-    case PROP_ALIGNMENT_TYPE:
-      g_value_set_int (value, nvinfer->alignment_type);
-      break;
-    case PROP_ALIGNMENT_PARENT:
-      g_value_set_int (value, nvinfer->alignment_parent);
-      break;
-    case PROP_ALIGNMENT_PICS:
-      g_value_set_int (value, nvinfer->alignment_pics);
-      break;
-    case PROP_ALIGNMENT_DEBUG_LEVEL:
-      g_value_set_int (value, nvinfer->alignment_debug_level);
       break;
     case PROP_OPERATE_ON_CLASS_IDS:
     {
@@ -729,6 +682,17 @@ gst_nvinfer_get_property (GObject * object, guint prop_id,
       break;
     case PROP_INPUT_TENSOR_META:
       g_value_set_boolean (value, nvinfer->input_tensor_from_meta);
+      break;
+    
+    /* Custom Alignment*/
+    case PROP_OUTPUT_LMKS:
+      g_value_set_int (value, nvinfer->enable_output_landmark);
+      break;
+    case PROP_ALIGNMENT_TYPE:
+      g_value_set_int (value, nvinfer->alignment_type);
+      break;
+    case PROP_ALIGNMENT_PICS:
+      g_value_set_string (value, nvinfer->alignment_pic_path);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -885,6 +849,7 @@ gst_nvinfer_start (GstBaseTransform * btrans)
   std::string nvtx_str;
   DsNvInferImpl *impl = DS_NVINFER_IMPL (nvinfer);
   NvDsInferContextHandle infer_context = nullptr;
+
   LockGMutex lock (nvinfer->process_lock);
   NvDsInferContextInitParams *init_params = impl->m_InitParams.get ();
   assert (init_params);
@@ -917,52 +882,6 @@ gst_nvinfer_start (GstBaseTransform * btrans)
   }
 
   nvinfer->interval_counter = 0;
-  //////////////////////////////////////insert 2 start
-
-  nvinfer->processing_height = 1080;
-  nvinfer->processing_width = 1920;
-
-    if (nvinfer->inter_buf)
-        NvBufSurfaceDestroy (nvinfer->inter_buf);
-    nvinfer->inter_buf = NULL;
-
-    /* An intermediate buffer for NV12/RGBA to BGR conversion  will be
-     * required. Can be skipped if custom algorithm can work directly on NV12/RGBA. */
-    NvBufSurfaceCreateParams create_params;
-
-    create_params.gpuId  = nvinfer->gpu_id;
-    create_params.width  = nvinfer->processing_width;
-    create_params.height = nvinfer->processing_height;
-    create_params.size = 0;
-    create_params.colorFormat = NVBUF_COLOR_FORMAT_RGBA;
-    create_params.layout = NVBUF_LAYOUT_PITCH;
-    create_params.memType = NVBUF_MEM_CUDA_UNIFIED;
-
-    if (NvBufSurfaceCreate (&nvinfer->inter_buf, 1,
-                            &create_params) != 0) {
-        GST_ERROR ("Error: Could not allocate internal buffer for custominfer");
-    }
-
-
-    /* Create host memory for storing converted/scaled interleaved RGB data */
-    CHECK_CUDA_STATUS (cudaMallocHost (&nvinfer->host_rgb_buf,
-                                       nvinfer->processing_width * nvinfer->processing_height *
-                                       RGB_BYTES_PER_PIXEL), "Could not allocate cuda host buffer");
-
-    GST_DEBUG_OBJECT (nvinfer, "allocated cuda buffer %p \n",
-                      nvinfer->host_rgb_buf);
-
-
-    // std::thread th2(proc, nvinfer->crop_data);
-    nvinfer->cvmat =
-            new cv::Mat (nvinfer->processing_height, nvinfer->processing_width,
-                         CV_8UC3, nvinfer->host_rgb_buf,
-                         nvinfer->processing_width * RGB_BYTES_PER_PIXEL);
-
-    if (!nvinfer->cvmat)
-        printf("CVmat error\n");
-
-  ////////////////////////////////////////////
 
   /* Should not infer on objects smaller than MIN_INPUT_OBJECT_WIDTH x MIN_INPUT_OBJECT_HEIGHT
    * since it will cause hardware scaling issues. */
@@ -1230,134 +1149,7 @@ gst_nvinfer_stop (GstBaseTransform * btrans)
   g_queue_free (nvinfer->process_queue);
   g_queue_free (nvinfer->input_queue);
 
-  if (nvinfer->inter_buf)
-    NvBufSurfaceDestroy(nvinfer->inter_buf);
-  nvinfer->inter_buf = NULL;
-
   return TRUE;
-}
-
-
-static GstFlowReturn
-get_converted_mat (GstNvInfer * nvinfer, NvBufSurface *src_surf, gint idx,
-                   NvOSD_RectParams * crop_rect_params, gdouble & ratio, gint input_width,
-                   gint input_height)
-{
-    NvBufSurfTransform_Error err;
-    NvBufSurfTransformConfigParams transform_config_params;
-    NvBufSurfTransformParams transform_params;
-    NvBufSurfTransformRect src_rect;
-    NvBufSurfTransformRect dst_rect;
-    NvBufSurface ip_surf;
-    cv::Mat in_mat;
-    ip_surf = *src_surf;
-
-    ip_surf.numFilled = ip_surf.batchSize = 1;
-    ip_surf.surfaceList = &(src_surf->surfaceList[idx]);
-
-    gint src_left = GST_ROUND_UP_2((unsigned int)crop_rect_params->left);
-    gint src_top = GST_ROUND_UP_2((unsigned int)crop_rect_params->top);
-    gint src_width = GST_ROUND_DOWN_2((unsigned int)crop_rect_params->width);
-    gint src_height = GST_ROUND_DOWN_2((unsigned int)crop_rect_params->height);
-
-    nvinfer->processing_height = input_height;
-    nvinfer->processing_width = input_width;
-    /* Maintain aspect ratio */
-    double hdest = nvinfer->processing_width * src_height / (double) src_width;
-    double wdest = nvinfer->processing_height * src_width / (double) src_height;
-    guint dest_width, dest_height;
-    std::cout<<dest_width<<"  "<<dest_height<<std::endl;
-
-    if (hdest <= nvinfer->processing_height) {
-        dest_width = nvinfer->processing_width;
-        dest_height = hdest;
-    } else {
-        dest_width = wdest;
-        dest_height = nvinfer->processing_height;
-    }
-
-    /* Configure transform session parameters for the transformation */
-    transform_config_params.compute_mode = NvBufSurfTransformCompute_Default;
-    transform_config_params.gpu_id = nvinfer->gpu_id;
-    transform_config_params.cuda_stream = nvinfer->convertStream;
-
-    /* Set the transform session parameters for the conversions executed in this
-     * thread. */
-    err = NvBufSurfTransformSetSessionParams (&transform_config_params);
-    if (err != NvBufSurfTransformError_Success) {
-        GST_ELEMENT_ERROR (nvinfer, STREAM, FAILED,
-                           ("NvBufSurfTransformSetSessionParams failed with error %d", err), (NULL));
-        goto error;
-    }
-
-    /* Calculate scaling ratio while maintaining aspect ratio */
-    ratio = MIN (1.0 * dest_width/ src_width, 1.0 * dest_height / src_height);
-
-    if ((crop_rect_params->width == 0) || (crop_rect_params->height == 0)) {
-        GST_ELEMENT_ERROR (nvinfer, STREAM, FAILED,
-                           ("%s:crop_rect_params dimensions are zero",__func__), (NULL));
-        goto error;
-    }
-
-#ifdef __aarch64__
-    if (ratio <= 1.0 / 16 || ratio >= 16.0) {
-    /* Currently cannot scale by ratio > 16 or < 1/16 for Jetson */
-    goto error;
-  }
-#endif
-    /* Set the transform ROIs for source and destination */
-    src_rect = {(guint)src_top, (guint)src_left, (guint)src_width, (guint)src_height};
-    dst_rect = {0, 0, (guint)dest_width, (guint)dest_height};
-
-    /* Set the transform parameters */
-    transform_params.src_rect = &src_rect;
-    transform_params.dst_rect = &dst_rect;
-    transform_params.transform_flag =
-            NVBUFSURF_TRANSFORM_FILTER | NVBUFSURF_TRANSFORM_CROP_SRC |
-            NVBUFSURF_TRANSFORM_CROP_DST;
-    transform_params.transform_filter = NvBufSurfTransformInter_Default;
-
-    /* Memset the memory */
-    NvBufSurfaceMemSet (nvinfer->inter_buf, 0, 0, 0);
-
-    GST_DEBUG_OBJECT (nvinfer, "Scaling and converting input buffer\n");
-
-    /* Transformation scaling+format conversion if any. */
-    err = NvBufSurfTransform (&ip_surf, nvinfer->inter_buf, &transform_params);
-    if (err != NvBufSurfTransformError_Success) {
-        GST_ELEMENT_ERROR (nvinfer, STREAM, FAILED,
-                           ("NvBufSurfTransform failed with error %d while converting buffer", err),
-                           (NULL));
-        goto error;
-    }
-    /* Map the buffer so that it can be accessed by CPU */
-    if (NvBufSurfaceMap (nvinfer->inter_buf, 0, 0, NVBUF_MAP_READ) != 0){
-        goto error;
-    }
-
-    /* Cache the mapped data for CPU access */
-    NvBufSurfaceSyncForCpu (nvinfer->inter_buf, 0, 0);
-
-    /* Use openCV to remove padding and convert RGBA to BGR. Can be skipped if
-     * algorithm can handle padded RGBA data. */
-    in_mat =
-            cv::Mat (nvinfer->processing_height, nvinfer->processing_width,
-                     CV_8UC4, nvinfer->inter_buf->surfaceList[0].mappedAddr.addr[0],
-                     nvinfer->inter_buf->surfaceList[0].pitch);
-#if (CV_MAJOR_VERSION >= 4)
-    cv::cvtColor (in_mat, *nvinfer->cvmat, cv::COLOR_RGBA2BGR);
-#else
-    cv::cvtColor (in_mat, *nvinfer->cvmat, CV_RGBA2BGR);
-#endif
-
-    if (NvBufSurfaceUnMap (nvinfer->inter_buf, 0, 0)){
-        goto error;
-    }
-
-    return GST_FLOW_OK;
-
-    error:
-    return GST_FLOW_ERROR;
 }
 
 /**
@@ -1385,9 +1177,7 @@ get_converted_buffer (GstNvInfer * nvinfer, NvBufSurface * src_surf,
      * the aspect ratio. */
     double hdest = dest_frame->width * src_height / (double) src_width;
     double wdest = dest_frame->height * src_width / (double) src_height;
-    //std::cout<<"infer id "<<nvinfer->unique_id<<std::endl;
     int pixel_size;
-    //std::cout<<"dest frame: "<<dest_frame->width<<"  "<<dest_frame->height<<std::endl;
     cudaError_t cudaReturn;
 
     if (hdest <= dest_frame->height) {
@@ -1397,7 +1187,7 @@ get_converted_buffer (GstNvInfer * nvinfer, NvBufSurface * src_surf,
       dest_width = wdest;
       dest_height = dest_frame->height;
     }
-    //std::cout<<"final dest size: "<<dest_width<<"  "<<dest_height<<std::endl;
+
     switch (dest_frame->colorFormat) {
       case NVBUF_COLOR_FORMAT_RGBA:
         pixel_size = 4;
@@ -1502,7 +1292,6 @@ get_converted_buffer (GstNvInfer * nvinfer, NvBufSurface * src_surf,
    */
   ratio_x = (double) dest_width / src_width;
   ratio_y = (double) dest_height / src_height;
-  //std::cout<<"r_x:"<<ratio_x<<" r_y:"<<ratio_y<<std::endl;
 
   /* Create temporary src and dest surfaces for NvBufSurfTransform API. */
   nvinfer->tmp_surf.surfaceList[nvinfer->tmp_surf.numFilled] = *src_frame;
@@ -1513,10 +1302,8 @@ get_converted_buffer (GstNvInfer * nvinfer, NvBufSurface * src_surf,
   /* Set the dest ROI. Could be the entire destination frame or part of it to
    * maintain aspect ratio. */
   if (!nvinfer->symmetric_padding) {
-    //std::cout<<"src "<<src_top<<" "<<src_left<<" "<<src_width<<" "<<src_height<<std::endl;
-    //std::cout<<"dest "<<dest_width<<" "<<dest_height<<std::endl;
     nvinfer->transform_params.dst_rect[nvinfer->tmp_surf.numFilled] =
-        { 0, 0, dest_width , dest_height  };
+        { 0, 0, dest_width, dest_height };
   } else {
     nvinfer->transform_params.dst_rect[nvinfer->tmp_surf.numFilled] =
         { offset_top, offset_left, dest_width, dest_height };
@@ -1631,756 +1418,6 @@ queue_batch:
   return NULL;
 }
 
-/* use similarTransform matrix to do warp perspective trans */
-// TODO:to crop a picture larger than 112 * 112 
-static void
-align_preprocess(NvBufSurface * surface, cv::Mat &M, int align_type, int id, cv::Mat &whole_frame){
-  for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
-    gint frame_width = (gint)surface->surfaceList[frameIndex].width;
-    gint frame_height = (gint)surface->surfaceList[frameIndex].height;
-
-    void *src_data = NULL;
-    CHECK_CUDA_STATUS (cudaMallocHost (&src_data,
-                                       surface->surfaceList[frameIndex].dataSize), "Could not allocate cuda host buffer");
-
-    if (src_data == NULL) {
-      g_print("Error: failed to malloc src_data \n");
-    }
-    auto start = std::chrono::system_clock::now();
-    cudaMemcpy((void *)src_data,
-        (void *)surface->surfaceList[frameIndex].dataPtr,
-        surface->surfaceList[frameIndex].dataSize,
-        cudaMemcpyDeviceToHost);
-    auto CheckPoint_d2h = std::chrono::system_clock::now();
-    spdlog::debug("Copy mem from Device to Host time cost: {} us.", std::chrono::duration_cast<std::chrono::microseconds>(CheckPoint_d2h - start).count());
-
-    size_t frame_step = surface->surfaceList[frameIndex].pitch;
-    spdlog::trace("Nvsurface colorformat = {}.", surface->surfaceList[frameIndex].colorFormat);
-
-    cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC3, src_data, frame_step);
-    
-    if (align_type == 1){
-      cv::Mat transfer_mat = M(cv::Rect(0, 0, 3, 2));
-      cv::warpAffine(whole_frame, frame, transfer_mat, cv::Size(112, 112), 1, 0, 0);
-    } else if (align_type == 2){
-      cv::Mat frame_rgb = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
-      cv::cvtColor(whole_frame, frame_rgb, CV_RGBA2RGB);
-      cv::warpPerspective(frame_rgb, frame, M, cv::Size(94, 24), 2, 1, 0);
-    } else if (align_type == 3){
-      cv::Mat frame_rgb = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
-      cv::cvtColor(whole_frame, frame_rgb, CV_RGBA2RGB);
-      cv::warpPerspective(frame_rgb, frame, M, cv::Size(160, 48), 2, 1, 0);
-    }
-
-    auto CheckPoint_alignment = std::chrono::system_clock::now();
-    spdlog::debug("Alignment finished, time cost: {} us.", std::chrono::duration_cast<std::chrono::microseconds>(CheckPoint_alignment - CheckPoint_d2h).count());
-    size_t sizeInBytes = surface->surfaceList[frameIndex].dataSize;
-    cudaMemcpy((void *)surface->surfaceList[frameIndex].dataPtr,
-        frame.ptr(0),
-        sizeInBytes,
-        cudaMemcpyHostToDevice);  
-    auto CheckPoint_h2d = std::chrono::system_clock::now();
-    spdlog::debug("Copy mem from Host to Device time cost: {} us.", std::chrono::duration_cast<std::chrono::microseconds>(CheckPoint_h2d - CheckPoint_alignment).count());
-    cudaFreeHost(src_data);
-  }
-}
-
-static void
-save_original_frame(NvBufSurface * surface, int id){
-  for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
-    gint frame_width = (gint)surface->surfaceList[frameIndex].width;
-    gint frame_height = (gint)surface->surfaceList[frameIndex].height;
-
-    void *src_data = NULL;
-    src_data = (char *)malloc(surface->surfaceList[frameIndex].dataSize);
-    if (src_data == NULL) {
-    g_print("Error: failed to malloc src_data \n");
-    }
-    //auto start = std::chrono::system_clock::now();
-    cudaMemcpy((void *)src_data,
-        (void *)surface->surfaceList[frameIndex].dataPtr,
-        surface->surfaceList[frameIndex].dataSize,
-        cudaMemcpyDeviceToHost);
-    //auto end = std::chrono::system_clock::now();
-    //std::cout << "d to H time usage:"<<std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us" << std::endl;
-    size_t frame_step = surface->surfaceList[frameIndex].pitch;
-    printf("all_bbox_generated called! colorformat =%d\n", surface->surfaceList[frameIndex].colorFormat);
-    cv::Mat frame = cv::Mat(frame_height + frame_height/2, frame_width, CV_8UC1, src_data, frame_step);
-    cv::Mat out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC4);
-    cv::cvtColor(frame, out_mat, CV_YUV2RGBA_NV21);
-   
-    char yuv_name[100] = "";
-    sprintf(yuv_name, "images/aligned/frame-%d.png", id);  
-    cv::imwrite(yuv_name, out_mat); 
-  }
-}
-
-static void
-save_network_frame(NvBufSurface * surface, int id){
-  for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
-    gint frame_width = (gint)surface->surfaceList[frameIndex].width;
-    gint frame_height = (gint)surface->surfaceList[frameIndex].height;
-
-    void *src_data = NULL;
-    src_data = (char *)malloc(surface->surfaceList[frameIndex].dataSize);
-    if (src_data == NULL) {
-    g_print("Error: failed to malloc src_data \n");
-    }
-    auto start = std::chrono::system_clock::now();
-    cudaMemcpy((void *)src_data,
-        (void *)surface->surfaceList[frameIndex].dataPtr,
-        surface->surfaceList[frameIndex].dataSize,
-        cudaMemcpyDeviceToHost);
-    
-    size_t frame_step = surface->surfaceList[frameIndex].pitch;
-    printf("all_bbox_generated called! colorformat =%d\n", surface->surfaceList[frameIndex].colorFormat);
-    cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC4, src_data, frame_step);
-    cv::Mat out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC4);
-    cv::cvtColor(frame, out_mat, CV_RGBA2BGR);
-
-    auto end = std::chrono::system_clock::now();
-    std::cout << "cpu d to H time usage:"<<std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us" << std::endl;
-   
-    char yuv_name[100] = "";
-    sprintf(yuv_name, "images/aligned/network-input-%d.png", id);  
-    cv::imwrite(yuv_name, out_mat); 
-  }
-}
-
-/* 
-get background image and cropped object image 
-background image will be used to do alignment
-cropped object image will be uploaded
-*/
-static std::tuple<cv::Mat, cv::Mat>
-get_images(NvBufSurface * surface, NvDsObjectMeta *object_meta, float pic_width, float pic_height, float matrix[][2]=NULL){ 
-  for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
-    gint frame_width = (gint)surface->surfaceList[frameIndex].width;
-    gint frame_height = (gint)surface->surfaceList[frameIndex].height;
-
-    void *src_data = NULL;
-    CHECK_CUDA_STATUS (cudaMallocHost (&src_data,
-                                       surface->surfaceList[frameIndex].dataSize), "Could not allocate cuda host buffer");
-
-
-    if (src_data == NULL) {
-    g_print("Error: failed to malloc src_data \n");
-    }
-    auto start = std::chrono::system_clock::now();
-    cudaMemcpy((void *)src_data,
-        (void *)surface->surfaceList[frameIndex].dataPtr,
-        surface->surfaceList[frameIndex].dataSize,
-        cudaMemcpyDeviceToHost);
-    auto end = std::chrono::system_clock::now();
-    spdlog::debug("Copy background image mem frome Device to Host time cost: {} us.", std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
-    size_t frame_step = surface->surfaceList[frameIndex].pitch;
-
-    // printf("colorformat =%d\n", surface->surfaceList[frameIndex].colorFormat);
-    cv::Mat out_mat;
-    if(surface->surfaceList[frameIndex].colorFormat == 7){
-      cv::Mat frame = cv::Mat(frame_height + frame_height/2, frame_width, CV_8UC1, src_data, frame_step);
-      out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC4);
-      cv::cvtColor(frame, out_mat, CV_YUV2RGBA_NV21);
-    } else{
-      cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC4, src_data, frame_step);
-      out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
-      cv::cvtColor(frame, out_mat, CV_RGBA2BGR);
-    }
-    
-    int x1 = int(CLIP(object_meta->rect_params.left - pic_width, 0, 10000));
-    int y1 = int(CLIP(object_meta->rect_params.top - pic_height, 0, 10000));
-    int x2 = int(CLIP(object_meta->rect_params.left + object_meta->rect_params.width + pic_width, 0, STREAMMUX_WIDTH));
-    int y2 = int(CLIP(object_meta->rect_params.top + object_meta->rect_params.height + pic_height, 0, STREAMMUX_HEIGHT));
-
-    // Draw bbox and lmk points
-    // cv::rectangle(out_mat,cvPoint(int(object_meta->rect_params.left),int(object_meta->rect_params.top)),cvPoint(int(object_meta->rect_params.left + object_meta->rect_params.width),int(object_meta->rect_params.top + object_meta->rect_params.height)),cv::Scalar(255,0,0),1,1,0);
-    // for(int i=0;i<5;i++){
-    //   cv::Point centerCircle1(matrix[i][0], matrix[i][1]);
-    //   int radiusCircle = 1;
-    //   cv::Scalar colorCircle1(0, 0, 255); // (B, G, R)
-    //   int thicknessCircle1 = 1;
-    //   cv::circle(out_mat, centerCircle1, radiusCircle, colorCircle1, thicknessCircle1);
-    // }
-
-    cv::Rect rect(x1, y1, (x2-x1), (y2-y1));                              
-	  cv::Mat roiImage = out_mat(rect);
-    cv::Mat cropped;
-    cv::Mat whole_frame;
-    // Copy the data into new matrix
-    roiImage.copyTo(cropped);
-    out_mat.copyTo(whole_frame);
-    cudaFreeHost(src_data);
-    return std::make_tuple(cropped, whole_frame);
-  }
-}
-
-/* save cropped image to check trans successfully or not */
-static void
-save_aligned_pics(NvBufSurface * surface, int track_id){
-  for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
-    gint frame_width = (gint)surface->surfaceList[frameIndex].width;
-    gint frame_height = (gint)surface->surfaceList[frameIndex].height;
-
-    void *src_data = NULL;
-    CHECK_CUDA_STATUS (cudaMallocHost (&src_data,
-                                       surface->surfaceList[frameIndex].dataSize), "Could not allocate cuda host buffer");
-
-    if (src_data == NULL) {
-    g_print("Error: failed to malloc src_data \n");
-    }
-    auto start = std::chrono::system_clock::now();
-    cudaMemcpy((void *)src_data,
-        (void *)surface->surfaceList[frameIndex].dataPtr,
-        surface->surfaceList[frameIndex].dataSize,
-        cudaMemcpyDeviceToHost);
-    auto end = std::chrono::system_clock::now();
-    spdlog::debug("Aligned image copy from Device to Host, time cost: {} us.", std::chrono::duration_cast<std::chrono::microseconds>(end - start).count());
-    size_t frame_step = surface->surfaceList[frameIndex].pitch;
-
-    cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC3, src_data, frame_step);
-    char img_name[100] = "";
-    sprintf(img_name, "images/aligned/alignment-%d.png", track_id);  
-    cv::imwrite(img_name, frame); 
-    auto end_save = std::chrono::system_clock::now();
-    spdlog::debug("Aligned image be saved to local, time cost: {} us.", std::chrono::duration_cast<std::chrono::microseconds>(end_save - end).count());
-
-    cudaFreeHost(src_data);
-  }
-}
-
-/* save cropped image to check trans successfully or not */
-static void
-gpu_conv_test(GstNvInfer *nvinfer, NvBufSurface * surface, int track_id){
-  cv::Mat frame_t;
-  for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
-    gint frame_width = (gint)surface->surfaceList[frameIndex].width;
-    gint frame_height = (gint)surface->surfaceList[frameIndex].height;
-
-    void *src_data = NULL;
-    src_data = (char *)malloc(surface->surfaceList[frameIndex].dataSize);
-    if (src_data == NULL) {
-    g_print("Error: failed to malloc src_data \n");
-    }
-    auto start = std::chrono::system_clock::now();
-    cudaMemcpy((void *)src_data,
-        (void *)surface->surfaceList[frameIndex].dataPtr,
-        surface->surfaceList[frameIndex].dataSize,
-        cudaMemcpyDeviceToHost);
-    auto end = std::chrono::system_clock::now();
-    std::cout << "d to H time usage:"<<std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us" << std::endl;
-    size_t frame_step = surface->surfaceList[frameIndex].pitch;
-    printf("all_bbox_generated called! colorformat =%d\n", surface->surfaceList[frameIndex].colorFormat);
-
-    cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC4, src_data, frame_step);
-
-    // frame_t = frame;
-    // (*nvinfer->crop_data)[count_num_2++] = frame;
-
-    // cv::Mat frame = cv::Mat(frame_height + frame_height/2, frame_width, CV_8UC1, src_data, frame_step);
-    // cv::Mat out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC4);
-    // cv::cvtColor(frame, out_mat, CV_YUV2RGBA_NV21);
-    cv::Mat out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
-    cv::cvtColor(frame, out_mat, CV_BGR2RGB);
-    char yuv_name[100] = "";
-    sprintf(yuv_name, "images/aligned/alignment-%d.png", count_num_2++);  
-    cv::imwrite(yuv_name, out_mat); 
-    auto end_2 = std::chrono::system_clock::now();
-    std::cout << "save img to local time usage:"<<std::chrono::duration_cast<std::chrono::microseconds>(end_2 - end).count() << "us" << std::endl;
-  }
-}
-
-
-/* save cropped image to check trans successfully or not */
-static void
-save_before_pics(NvBufSurface * surface, NvDsObjectMeta *object_meta, int frame_num, GstNvInfer *nvinfer, float matrix[][2]){
-  for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
-    gint frame_width = (gint)surface->surfaceList[frameIndex].width;
-    gint frame_height = (gint)surface->surfaceList[frameIndex].height;
-
-    void *src_data = NULL;
-    src_data = (char *)malloc(surface->surfaceList[frameIndex].dataSize);
-    if (src_data == NULL) {
-    g_print("Error: failed to malloc src_data \n");
-    }
-    //auto start = std::chrono::system_clock::now();
-    cudaMemcpy((void *)src_data,
-        (void *)surface->surfaceList[frameIndex].dataPtr,
-        surface->surfaceList[frameIndex].dataSize,
-        cudaMemcpyDeviceToHost);
-    //auto end = std::chrono::system_clock::now();
-    //std::cout << "d to H time usage:"<<std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << "us" << std::endl;
-    // std::cout<<"111: "<<frame_height<<"    "<<frame_width<<std::endl;
-    size_t frame_step = surface->surfaceList[frameIndex].pitch;
-    cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC3, src_data, frame_step);
-    cv::Mat out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
-    cv::cvtColor(frame, out_mat, CV_RGB2BGR);
-
-    char yuv_name[100] = "";
-    sprintf(yuv_name, "images/before/before-%d.png", 0);  
-    if (nvinfer->alignment_type == 1){
-      if (nvinfer->alignment_pics == 2) {
-        // draw landmark points
-        for(int i=0;i<5;i++){
-          cv::Point centerCircle1(matrix[i][0], matrix[i][1]);
-          int radiusCircle = 1;
-          cv::Scalar colorCircle1(0, 0, 255); // (B, G, R)
-          int thicknessCircle1 = 1;
-          cv::circle(out_mat, centerCircle1, radiusCircle, colorCircle1, thicknessCircle1);
-        }
-      }  
-    }
-    else if (nvinfer->alignment_type == 2){
-      // draw landmark points
-      for(int i=0;i<4;i++){
-        cv::Point centerCircle1(matrix[i][0], matrix[i][1]);
-        int radiusCircle = 1;
-        cv::Scalar colorCircle1(0, 0, 255); // (B, G, R)
-        int thicknessCircle1 = 1;
-        cv::circle(out_mat, centerCircle1, radiusCircle, colorCircle1, thicknessCircle1);
-      }
-    }
-    cv::imwrite(yuv_name, out_mat); 
-  }
-}
-
-inline bool exists_file(const std::string& name) {
-    struct stat buffer;
-    return (stat(name.c_str(), &buffer) == 0);
-}
-
-/* 
-To check THE face whether already be inferred of not.
-We don't want reinfer a same face until it is been sent out
-or be captured with better resolution. 
-*/
-static gboolean
-check_image_exists(NvDsObjectMeta *object_meta){
-  char file_path[100] = "";
-  sprintf(file_path, "images/before/origin-%d.png", object_meta->object_id); 
-  std::string file_name(file_path);
-  if (exists_file(file_name)){
-    return FALSE;
-  } else {
-    return TRUE;
-  }
-}
-
-/* to check face quality */
-static gboolean
-is_front_face(float face[][2]){
-  float width_up   = face[1][0] - face[0][0];
-  float width_down = face[4][0] - face[3][0];
-  float height_left  = face[3][1] - face[0][1];
-  float height_right = face[4][1] - face[1][1];
-
-  if (face[2][0]<(face[0][0] + width_up / 5.f) || face[2][0]<(face[3][0] + width_down / 5.f) || 
-      face[2][0]>(face[1][0] - width_up / 5.f) || face[2][0]>(face[4][0] - width_down / 5.f)){
-    return FALSE;
-  }
-  if (face[2][1]>(face[3][1] - height_left / 5.f) || face[2][1]>(face[4][1] - height_right / 5.f) || 
-      face[2][1]<(face[1][1] + height_left / 5.f) || face[2][1]<(face[0][1] + height_right / 5.f)){
-    return FALSE;
-  }
-  // if (face[2][0]<face[0][0]  || face[2][0]<face[3][0] || 
-  //     face[2][0]>face[1][0]  || face[2][0]>face[4][0] ){
-  //   return FALSE;
-  // }
-  // if (face[2][0]<(face[0][0] + width_up / 5.f) || face[2][0]>(face[1][0] - width_up / 5.f)){
-  //   return FALSE;
-  // }
-  else{
-    return TRUE;
-  }
-}
-
-
-static void 
-mkdir_pics(const std::string &output_path){
-  if (access(output_path.c_str(), 0) == -1) {
-      // mkdir(output_path.c_str(),S_IRUSR | S_IWUSR | S_IXUSR | S_IRWXG | S_IRWXO);
-      system(("mkdir "+output_path).c_str());
-      spdlog::info("{} create.", output_path);
-  }
-  else {
-      system(("rm -rf "+output_path).c_str());
-      system(("mkdir "+output_path).c_str());
-      spdlog::info("{} recover create.", output_path);
-  }
-}
-
-static gboolean
-convert_batch_and_push_to_input_thread_face_alignment (GstNvInfer *nvinfer,
-    GstNvInferBatch *batch, GstNvInferMemory *mem, NvDsFrameMeta *frame_meta, 
-    NvDsObjectMeta *object_meta, NvOSD_RectParams * crop_rect_params, float face[][2])
-{
-  NvBufSurfTransform_Error err = NvBufSurfTransformError_Success;
-  std::string nvtx_str;
-
-  /* Set the transform session parameters for the conversions executed in this
-   * thread. */
-  err = NvBufSurfTransformSetSessionParams (&nvinfer->transform_config_params);
-  if (err != NvBufSurfTransformError_Success) {
-    GST_ELEMENT_ERROR (nvinfer, STREAM, FAILED,
-        ("NvBufSurfTransformSetSessionParams failed with error %d", err), (NULL));
-    return FALSE;
-  }
-
-  nvtxEventAttributes_t eventAttrib = {0};
-  eventAttrib.version = NVTX_VERSION;
-  eventAttrib.size = NVTX_EVENT_ATTRIB_STRUCT_SIZE;
-  eventAttrib.colorType = NVTX_COLOR_ARGB;
-  eventAttrib.color = 0xFFFF0000;
-  eventAttrib.messageType = NVTX_MESSAGE_TYPE_ASCII;
-  nvtx_str = "convert_buf batch_num=" + std::to_string(nvinfer->current_batch_num);
-  eventAttrib.message.ascii = nvtx_str.c_str();
-
-  nvtxDomainRangePushEx(nvinfer->nvtx_domain, &eventAttrib);
-
-  cv::Mat cropped, whole_frame;
-  float pic_width = object_meta->rect_params.width ;
-  float pic_height = object_meta->rect_params.height ;
-  
-  std::tie(cropped, whole_frame) = get_images(&nvinfer->tmp_surf, object_meta, pic_width, pic_height, face);
-
-  auto start = std::chrono::system_clock::now();
-  char img_name[100] = "";
-  sprintf(img_name, "images/before/origin-%d.png", object_meta->object_id);  
-  cv::imwrite(img_name, cropped); 
-  auto CheckPoint_img = std::chrono::system_clock::now();
-  spdlog::debug("Image face-{} save to local time cost: {} us.",object_meta->object_id, std::chrono::duration_cast<std::chrono::microseconds>(CheckPoint_img - start).count());
-
-  if (batch->frames.size() > 0) {
-    /* Batched tranformation. */
-    // for some reason, if use async, there will be a latency and cause disorder.
-    err = NvBufSurfTransform (&nvinfer->tmp_surf, mem->surf,
-              &nvinfer->transform_params);
-  }
-
-  if (err != NvBufSurfTransformError_Success) {
-    GST_ELEMENT_ERROR (nvinfer, STREAM, FAILED,
-        ("NvBufSurfTransform failed with error %d while converting buffer", err),
-        (NULL));
-    return FALSE;
-  }
-  
-  cv::Mat dst(5,2,CV_32FC1, face);
-  memcpy(dst.data, face, 2 * 5 * sizeof(float));
-  cv::Mat M = nvinfer->aligner.AlignFace(dst);
-  align_preprocess(mem->surf, M, nvinfer->alignment_type, object_meta->object_id, whole_frame);
-  memset(face, 0, sizeof(face));
-
-  //save mem->surf to check covering   
-  if(nvinfer->alignment_pics == 2){
-    if(nvinfer->alignment_parent == 2) {
-      save_aligned_pics(mem->surf, object_meta->parent->object_id);
-    }
-    else {
-      save_aligned_pics(mem->surf, object_meta->object_id);
-    }
-  }
-    
-  LockGMutex locker (nvinfer->process_lock);
-  /* Push the batch info structure in the processing queue and notify the output
-   * thread that a new batch has been queued. */
-  g_queue_push_tail (nvinfer->input_queue, batch);
-  g_cond_broadcast (&nvinfer->process_cond);
-  return TRUE;
-}
-
-static gboolean
-convert_batch_and_push_to_input_thread_plate_alignment (GstNvInfer *nvinfer,
-    GstNvInferBatch *batch, GstNvInferMemory *mem, NvDsFrameMeta *frame_meta, 
-    NvDsObjectMeta *object_meta, NvOSD_RectParams * crop_rect_params, std::vector<PlateInfo>& plate_res)
-{
-  
-  NvBufSurfTransform_Error err = NvBufSurfTransformError_Success;
-  std::string nvtx_str;
-
-  /* Set the transform session parameters for the conversions executed in this
-   * thread. */
-  err = NvBufSurfTransformSetSessionParams (&nvinfer->transform_config_params);
-  if (err != NvBufSurfTransformError_Success) {
-    GST_ELEMENT_ERROR (nvinfer, STREAM, FAILED,
-        ("NvBufSurfTransformSetSessionParams failed with error %d", err), (NULL));
-    return FALSE;
-  }
-
-  nvtxEventAttributes_t eventAttrib = {0};
-  eventAttrib.version = NVTX_VERSION;
-  eventAttrib.size = NVTX_EVENT_ATTRIB_STRUCT_SIZE;
-  eventAttrib.colorType = NVTX_COLOR_ARGB;
-  eventAttrib.color = 0xFFFF0000;
-  eventAttrib.messageType = NVTX_MESSAGE_TYPE_ASCII;
-  nvtx_str = "convert_buf batch_num=" + std::to_string(nvinfer->current_batch_num);
-  eventAttrib.message.ascii = nvtx_str.c_str();
-
-  nvtxDomainRangePushEx(nvinfer->nvtx_domain, &eventAttrib);
-
-  cv::Mat cropped, whole_frame;
-  float pic_width = object_meta->rect_params.width ;
-  float pic_height = object_meta->rect_params.height ;
-
-  std::tie(cropped, whole_frame) = get_images(&nvinfer->tmp_surf, object_meta, pic_width, pic_height);
-
-  if (batch->frames.size() > 0) {
-    // auto start = std::chrono::system_clock::now();
-    /* Batched tranformation. */
-    // for some reason, if use async, there will be a latency and cause disorder.
-    // err = NvBufSurfTransformAsync (&nvinfer->tmp_surf, mem->surf,
-    //           &nvinfer->transform_params, &batch->sync_obj);
-    err = NvBufSurfTransform (&nvinfer->tmp_surf, mem->surf,
-              &nvinfer->transform_params);
-  }
-
-  if (err != NvBufSurfTransformError_Success) {
-    GST_ELEMENT_ERROR (nvinfer, STREAM, FAILED,
-        ("NvBufSurfTransform failed with error %d while converting buffer", err),
-        (NULL));
-    return FALSE;
-  }
-  
-  float plate[4][2]={0};
-  for(auto& r : plate_res) {
-    // std::cout<<"now do align of car-"<<object_meta->parent->object_id<<" in frame "<<frame_meta->frame_num<<std::endl;
-    // std::cout<<"bbox coor:"<<r.bbox[0]<<" "<<r.bbox[1]<<" "<<r.bbox[2]<<" "<<r.bbox[3]<<std::endl;
-    float x_ratio = crop_rect_params->width/r.bbox[2];
-    float y_ratio = crop_rect_params->height/r.bbox[3];
-  
-    plate[0][0]=(r.landmark[4] - r.bbox[0]) * x_ratio + crop_rect_params->left;
-    plate[0][1]=(r.landmark[5] - r.bbox[1]) * y_ratio + crop_rect_params->top;
-    plate[1][0]=(r.landmark[6] - r.bbox[0]) * x_ratio + crop_rect_params->left;
-    plate[1][1]=(r.landmark[7] - r.bbox[1]) * y_ratio + crop_rect_params->top;
-    plate[2][0]=(r.landmark[2] - r.bbox[0]) * x_ratio + crop_rect_params->left;
-    plate[2][1]=(r.landmark[3] - r.bbox[1]) * y_ratio + crop_rect_params->top;
-    plate[3][0]=(r.landmark[0] - r.bbox[0]) * x_ratio + crop_rect_params->left;
-    plate[3][1]=(r.landmark[1] - r.bbox[1]) * y_ratio + crop_rect_params->top;
-        
-  }
-  // Draw bbox and lmk points
-  // cv::Mat test_mat;
-  // // Copy the data into new matrix
-  // whole_frame.copyTo(test_mat);
-  // cv::cvtColor(test_mat, test_mat, CV_RGBA2RGB);
-  // cv::rectangle(test_mat,cvPoint(int(object_meta->rect_params.left),int(object_meta->rect_params.top)),cvPoint(int(object_meta->rect_params.left + object_meta->rect_params.width),int(object_meta->rect_params.top + object_meta->rect_params.height)),cv::Scalar(255,0,0),1,1,0);
-  // for(int i=0;i<4;i++){
-  //   cv::Point centerCircle1(int(plate[i][0]), int(plate[i][1]));
-  //   int radiusCircle = 2;
-  //   cv::Scalar colorCircle1(0, 0, 255); // (B, G, R)
-  //   int thicknessCircle1 = 1;
-  //   cv::circle(test_mat, centerCircle1, radiusCircle, colorCircle1, thicknessCircle1);
-  // }
-
-  // // char img_name2[100] = "";
-  // sprintf(img_name2, "images/before/origin-2-%d.png", object_meta->object_id);  
-  // cv::imwrite(img_name2, test_mat); 
-
-
-  cv::Mat dst(4,2,CV_32FC1, plate);
-  memcpy(dst.data, plate, 2 * 4 * sizeof(float));
-  cv::Mat M;
-  if (nvinfer->alignment_type == 2) {
-    M = nvinfer->aligner.AlignPlate(dst, 1);
-  } else if (nvinfer->alignment_type == 3) {
-    M = nvinfer->aligner.AlignPlate(dst, 2);
-  }
-  
-  // std::cout<<"M=\n"<<M<<std::endl;
-  align_preprocess(mem->surf, M, nvinfer->alignment_type, 0, whole_frame);
-
-  // align_preprocess_new(nvinfer, mem->surf, M, nvinfer->alignment_type, frame_meta->frame_num, M);
-  memset(plate, 0, sizeof(plate));
-  
-  if(nvinfer->alignment_pics == 2){
-    if(nvinfer->alignment_parent == 2) {
-      save_aligned_pics(mem->surf, object_meta->parent->object_id);
-    }
-    else {
-      save_aligned_pics(mem->surf, count_num);
-      count_num = count_num + 1;
-    }
-  }
-  
-  
-  LockGMutex locker (nvinfer->process_lock);
-  /* Push the batch info structure in the processing queue and notify the output
-   * thread that a new batch has been queued. */
-  g_queue_push_tail (nvinfer->input_queue, batch);
-  g_cond_broadcast (&nvinfer->process_cond);
-  return TRUE;
-}
-
-
-/**
- * Calls the one of the required conversion functions based on the network
- * input format.
- */
-static GstFlowReturn
-get_converted_buffer_face_alignment (GstNvInfer * nvinfer, NvBufSurface * src_surf,
-    NvBufSurfaceParams * src_frame, NvOSD_RectParams * crop_rect_params,
-    NvBufSurface * dest_surf, NvBufSurfaceParams * dest_frame,
-    gdouble & ratio_x, gdouble & ratio_y, guint & offset_left,
-    guint & offset_top, void *destCudaPtr)
-{
-  guint src_left = GST_ROUND_UP_2 ((unsigned int)crop_rect_params->left);
-  guint src_top = GST_ROUND_UP_2 ((unsigned int)crop_rect_params->top);
-  guint src_width = GST_ROUND_DOWN_2 ((unsigned int)crop_rect_params->width);
-  guint src_height = GST_ROUND_DOWN_2 ((unsigned int)crop_rect_params->height);
-  guint dest_width, dest_height;
-
-  guint offset_right = 0, offset_bottom = 0;
-  offset_left = 0;
-  offset_top = 0;
-  if (nvinfer->maintain_aspect_ratio) {
-    
-    /* Calculate the destination width and height required to maintain
-     * the aspect ratio. */
-    double hdest = dest_frame->width * src_height / (double) src_width;
-    double wdest = dest_frame->height * src_width / (double) src_height;
-    //std::cout<<"infer id "<<nvinfer->unique_id<<std::endl;
-    int pixel_size;
-    //std::cout<<"dest frame: "<<dest_frame->width<<"  "<<dest_frame->height<<std::endl;
-    cudaError_t cudaReturn;
-
-    if (hdest <= dest_frame->height) {
-      dest_width = dest_frame->width;
-      dest_height = hdest;
-    } else {
-      dest_width = wdest;
-      dest_height = dest_frame->height;
-    }
-    //std::cout<<"final dest size: "<<dest_width<<"  "<<dest_height<<std::endl;
-   
-    switch (dest_frame->colorFormat) {
-      case NVBUF_COLOR_FORMAT_RGBA:
-        pixel_size = 4;
-        break;
-      case NVBUF_COLOR_FORMAT_RGB:
-        pixel_size = 3;
-        break;
-      case NVBUF_COLOR_FORMAT_GRAY8:
-      case NVBUF_COLOR_FORMAT_NV12:
-        pixel_size = 1;
-        break;
-      default:
-        g_assert_not_reached ();
-        break;
-    }
-    /* Pad the scaled image with black color. */
-    if (!nvinfer->symmetric_padding) {
-      /* Right-Bottom Padding. */
-      cudaReturn =
-          cudaMemset2DAsync ((uint8_t *) destCudaPtr + pixel_size * dest_width,
-          dest_frame->planeParams.pitch[0], 0,
-          pixel_size * (dest_frame->width - dest_width), dest_frame->height,
-          nvinfer->convertStream);
-      if (cudaReturn != cudaSuccess) {
-        GST_ERROR_OBJECT (nvinfer,
-            "cudaMemset2DAsync failed with error %s while converting buffer",
-            cudaGetErrorName (cudaReturn));
-        return GST_FLOW_ERROR;
-      }
-      cudaReturn =
-          cudaMemset2DAsync ((uint8_t *) destCudaPtr +
-          dest_frame->planeParams.pitch[0] * dest_height,
-          dest_frame->planeParams.pitch[0], 0, pixel_size * dest_width,
-          dest_frame->height - dest_height, nvinfer->convertStream);
-      if (cudaReturn != cudaSuccess) {
-        GST_ERROR_OBJECT (nvinfer,
-            "cudaMemset2DAsync failed with error %s while converting buffer",
-            cudaGetErrorName (cudaReturn));
-        return GST_FLOW_ERROR;
-      }
-    } else {
-      /* Symmetric Padding. */
-      offset_left = (dest_frame->width - dest_width) / 2;
-      offset_right = dest_frame->width - dest_width - offset_left;
-
-      cudaReturn =
-          cudaMemset2DAsync ((uint8_t *) destCudaPtr,
-          dest_frame->planeParams.pitch[0], 0,
-          pixel_size * offset_left, dest_frame->height, nvinfer->convertStream);
-      if (cudaReturn != cudaSuccess) {
-        GST_ERROR_OBJECT (nvinfer,
-            "cudaMemset2DAsync failed with error %s while converting buffer",
-            cudaGetErrorName (cudaReturn));
-        return GST_FLOW_ERROR;
-      }
-
-      cudaReturn =
-          cudaMemset2DAsync ((uint8_t *) destCudaPtr + pixel_size *
-          (dest_width + offset_left),
-          dest_frame->planeParams.pitch[0], 0,
-          pixel_size * offset_right, dest_frame->height,
-          nvinfer->convertStream);
-      if (cudaReturn != cudaSuccess) {
-        GST_ERROR_OBJECT (nvinfer,
-            "cudaMemset2DAsync failed with error %s while converting buffer",
-            cudaGetErrorName (cudaReturn));
-        return GST_FLOW_ERROR;
-      }
-
-      offset_top = (dest_frame->height - dest_height) / 2;
-      offset_bottom = dest_frame->height - dest_height - offset_top;
-
-      cudaReturn =
-          cudaMemset2DAsync ((uint8_t *) destCudaPtr,
-          dest_frame->planeParams.pitch[0], 0, pixel_size * dest_width,
-          offset_top, nvinfer->convertStream);
-      if (cudaReturn != cudaSuccess) {
-        GST_ERROR_OBJECT (nvinfer,
-            "cudaMemset2DAsync failed with error %s while converting buffer",
-            cudaGetErrorName (cudaReturn));
-        return GST_FLOW_ERROR;
-      }
-
-      cudaReturn =
-          cudaMemset2DAsync ((uint8_t *) destCudaPtr +
-          dest_frame->planeParams.pitch[0] * (dest_height + offset_top),
-          dest_frame->planeParams.pitch[0], 0, pixel_size * dest_width,
-          offset_bottom, nvinfer->convertStream);
-      if (cudaReturn != cudaSuccess) {
-        GST_ERROR_OBJECT (nvinfer,
-            "cudaMemset2DAsync failed with error %s while converting buffer",
-            cudaGetErrorName (cudaReturn));
-        return GST_FLOW_ERROR;
-      }
-    }
-  } else {
-    dest_width = nvinfer->network_width;
-    dest_height = nvinfer->network_height;
-  }
-  /* Calculate the scaling ratio of the frame / object crop. This will be
-   * required later for rescaling the detector output boxes to input resolution.
-   */
-  ratio_x = (double) dest_width / src_width;
-  ratio_y = (double) dest_height / src_height;
-  //std::cout<<"r_x:"<<ratio_x<<" r_y:"<<ratio_y<<std::endl;
-
-  /* Create temporary src and dest surfaces for NvBufSurfTransform API. */
-  nvinfer->tmp_surf.surfaceList[nvinfer->tmp_surf.numFilled] = *src_frame;
-
-  /* Set the source ROI. Could be entire frame or an object. */
-  nvinfer->transform_params.src_rect[nvinfer->tmp_surf.numFilled] =
-      { src_top, src_left, src_width, src_height };
-  /* Set the dest ROI. Could be the entire destination frame or part of it to
-   * maintain aspect ratio. */
-  if (!nvinfer->symmetric_padding) {
-    //std::cout<<"src "<<src_top<<" "<<src_left<<" "<<src_width<<" "<<src_height<<std::endl;
-    //std::cout<<"dest "<<dest_width<<" "<<dest_height<<std::endl;
-    nvinfer->transform_params.dst_rect[nvinfer->tmp_surf.numFilled] =
-        { 0, 0, dest_width , dest_height  };
-  } else {
-    nvinfer->transform_params.dst_rect[nvinfer->tmp_surf.numFilled] =
-        { offset_top, offset_left, dest_width, dest_height };
-  }
-
-  nvinfer->tmp_surf.numFilled++;
-  nvinfer->tmp_surf.memType = src_surf->memType;
-
-  return GST_FLOW_OK;
-}
-
-
 static gboolean
 convert_batch_and_push_to_input_thread (GstNvInfer *nvinfer,
     GstNvInferBatch *batch, GstNvInferMemory *mem)
@@ -2432,6 +1469,207 @@ convert_batch_and_push_to_input_thread (GstNvInfer *nvinfer,
   return TRUE;
 }
 
+static std::tuple<cv::Mat, cv::Mat>
+get_images(GstNvInfer *nvinfer, NvDsObjectMeta *object_meta, float pic_width, float pic_height, float matrix[][2]=NULL){ 
+  NvBufSurface * surface = &nvinfer->tmp_surf;
+  for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
+    gint frame_width = (gint)surface->surfaceList[frameIndex].width;
+    gint frame_height = (gint)surface->surfaceList[frameIndex].height;
+
+    void *src_data = NULL;
+    CHECK_CUDA_STATUS (cudaMallocHost (&src_data,
+                                       surface->surfaceList[frameIndex].dataSize), "Could not allocate cuda host buffer");
+
+
+    if (src_data == NULL) {
+    g_print("Error: failed to malloc src_data \n");
+    }
+    auto start = std::chrono::system_clock::now();
+    cudaMemcpy((void *)src_data,
+        (void *)surface->surfaceList[frameIndex].dataPtr,
+        surface->surfaceList[frameIndex].dataSize,
+        cudaMemcpyDeviceToHost);
+    auto end = std::chrono::system_clock::now();
+    size_t frame_step = surface->surfaceList[frameIndex].pitch;
+
+    // printf("colorformat =%d\n", surface->surfaceList[frameIndex].colorFormat);
+    cv::Mat out_mat;
+    int colorFormat = surface->surfaceList[frameIndex].colorFormat;
+    // GST_DEBUG_OBJECT(nvinfer, "Origin frame color format:%d.", colorFormat);
+    if(colorFormat == 7 || colorFormat == 33){
+      cv::Mat frame = cv::Mat(frame_height + frame_height/2, frame_width, CV_8UC1, src_data, frame_step);
+      out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC4);
+      cv::cvtColor(frame, out_mat, CV_YUV2RGB_NV21);
+    } else{
+      cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC4, src_data, frame_step);
+      out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
+      cv::cvtColor(frame, out_mat, CV_RGBA2BGR);
+    }
+    
+    int x1 = int(CLIP(object_meta->rect_params.left - pic_width, 0, out_mat.size().width));
+    int y1 = int(CLIP(object_meta->rect_params.top - pic_height, 0, out_mat.size().height));
+    int x2 = int(CLIP(object_meta->rect_params.left + object_meta->rect_params.width + pic_width, 0, out_mat.size().width));
+    int y2 = int(CLIP(object_meta->rect_params.top + object_meta->rect_params.height + pic_height, 0, out_mat.size().height));
+
+    cv::Mat whole_frame;
+    out_mat.copyTo(whole_frame);
+
+    // Draw bbox and lmk points
+    // cv::rectangle(out_mat,cvPoint(int(object_meta->rect_params.left),int(object_meta->rect_params.top)),cvPoint(int(object_meta->rect_params.left + object_meta->rect_params.width),int(object_meta->rect_params.top + object_meta->rect_params.height)),cv::Scalar(255,0,0),1,1,0);
+    // for(int i=0;i<5;i++){
+    //   cv::Point centerCircle1(matrix[i][0], matrix[i][1]);
+    //   int radiusCircle = 1;
+    //   cv::Scalar colorCircle1(0, 0, 255); // (B, G, R)
+    //   int thicknessCircle1 = 1;
+    //   cv::circle(out_mat, centerCircle1, radiusCircle, colorCircle1, thicknessCircle1);
+    // }
+
+    cv::Rect rect(x1, y1, (x2-x1), (y2-y1));                              
+	  cv::Mat roiImage = out_mat(rect);
+    cv::Mat cropped;
+    roiImage.copyTo(cropped);
+    
+    cudaFreeHost(src_data);
+    return std::make_tuple(cropped, whole_frame);
+  }
+}
+
+static cv::Mat
+align_preprocess(NvBufSurface * surface, cv::Mat &M, int align_type, int id, cv::Mat &whole_frame){
+  for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
+    gint frame_width = (gint)surface->surfaceList[frameIndex].width;
+    gint frame_height = (gint)surface->surfaceList[frameIndex].height;
+
+    void *src_data = NULL;
+    CHECK_CUDA_STATUS (cudaMallocHost (&src_data,
+                                       surface->surfaceList[frameIndex].dataSize), "Could not allocate cuda host buffer");
+
+    if (src_data == NULL) {
+      g_print("Error: failed to malloc src_data \n");
+    }
+    auto start = std::chrono::system_clock::now();
+    cudaMemcpy((void *)src_data,
+        (void *)surface->surfaceList[frameIndex].dataPtr,
+        surface->surfaceList[frameIndex].dataSize,
+        cudaMemcpyDeviceToHost);
+    auto CheckPoint_d2h = std::chrono::system_clock::now();
+
+    size_t frame_step = surface->surfaceList[frameIndex].pitch;
+
+    cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC3, src_data, frame_step);
+    
+    if (align_type == 1){
+      cv::Mat transfer_mat = M(cv::Rect(0, 0, 3, 2));
+      cv::warpAffine(whole_frame, frame, transfer_mat, cv::Size(112, 112), 1, 0, 0);
+    } else if (align_type == 2){
+      cv::Mat frame_rgb = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
+      cv::cvtColor(whole_frame, frame_rgb, CV_RGBA2RGB);
+      cv::warpPerspective(frame_rgb, frame, M, cv::Size(94, 24), 2, 1, 0);
+    } else if (align_type == 3){
+      cv::Mat frame_rgb = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
+      cv::cvtColor(whole_frame, frame_rgb, CV_RGBA2RGB);
+      cv::warpPerspective(frame_rgb, frame, M, cv::Size(160, 48), 2, 1, 0);
+    }
+
+    auto CheckPoint_alignment = std::chrono::system_clock::now();
+    size_t sizeInBytes = surface->surfaceList[frameIndex].dataSize;
+    cudaMemcpy((void *)surface->surfaceList[frameIndex].dataPtr,
+        frame.ptr(0),
+        sizeInBytes,
+        cudaMemcpyHostToDevice);  
+    auto CheckPoint_h2d = std::chrono::system_clock::now();
+    cudaFreeHost(src_data);
+    return frame;
+  }
+}
+
+
+static gboolean
+convert_batch_and_push_to_input_thread_alignment (GstNvInfer *nvinfer,
+    GstNvInferBatch *batch, GstNvInferMemory *mem, NvDsFrameMeta *frame_meta, 
+    NvDsObjectMeta *object_meta, NvOSD_RectParams * crop_rect_params, float landmarks[ARRAYSIZE])
+{
+  NvBufSurfTransform_Error err = NvBufSurfTransformError_Success;
+  std::string nvtx_str;
+
+  /* Set the transform session parameters for the conversions executed in this
+   * thread. */
+  err = NvBufSurfTransformSetSessionParams (&nvinfer->transform_config_params);
+  if (err != NvBufSurfTransformError_Success) {
+    GST_ELEMENT_ERROR (nvinfer, STREAM, FAILED,
+        ("NvBufSurfTransformSetSessionParams failed with error %d", err), (NULL));
+    return FALSE;
+  }
+
+  nvtxEventAttributes_t eventAttrib = {0};
+  eventAttrib.version = NVTX_VERSION;
+  eventAttrib.size = NVTX_EVENT_ATTRIB_STRUCT_SIZE;
+  eventAttrib.colorType = NVTX_COLOR_ARGB;
+  eventAttrib.color = 0xFFFF0000;
+  eventAttrib.messageType = NVTX_MESSAGE_TYPE_ASCII;
+  nvtx_str = "convert_buf batch_num=" + std::to_string(nvinfer->current_batch_num);
+  eventAttrib.message.ascii = nvtx_str.c_str();
+
+  nvtxDomainRangePushEx(nvinfer->nvtx_domain, &eventAttrib);
+
+  cv::Mat cropped, whole_frame;
+  float pic_width = 0 ;
+  float pic_height = 0 ;
+
+  int numNonZeroCount=0;
+  for (unsigned int i=0; i < ARRAYSIZE; i++) {
+    if (landmarks[i]) numNonZeroCount++;
+  }
+
+  float lmks[numNonZeroCount/2][2];
+  for (unsigned int i=0;i<numNonZeroCount;i++) {
+    lmks[i/2][i%2] = landmarks[i];
+  }
+
+  int row = sizeof(lmks) / sizeof(lmks[0]);
+  cv::Mat dst(row ,2, CV_32FC1, lmks);
+  memcpy(dst.data, lmks, 2 * row * sizeof(float));
+  cv::Mat M = nvinfer->aligner.Align(dst, nvinfer->alignment_type);
+
+  std::tie(cropped, whole_frame) = get_images(nvinfer, object_meta, pic_width, pic_height, lmks);
+
+  if (batch->frames.size() > 0) {
+    /* Batched tranformation. */
+    // for some reason, if use async, there will be a latency and cause disorder.
+    err = NvBufSurfTransform (&nvinfer->tmp_surf, mem->surf,
+              &nvinfer->transform_params);
+  }
+
+  if (err != NvBufSurfTransformError_Success) {
+    GST_ELEMENT_ERROR (nvinfer, STREAM, FAILED,
+        ("NvBufSurfTransform failed with error %d while converting buffer", err),
+        (NULL));
+    return FALSE;
+  }
+
+  cv::Mat aligned;
+  cv::Mat resizedMat;
+  aligned = align_preprocess(mem->surf, M, nvinfer->alignment_type, object_meta->object_id, whole_frame);
+
+  if (strlen(nvinfer->alignment_pic_path)) {
+    char image_aligned_name[strlen(nvinfer->alignment_pic_path)+100];
+    char image_frame_name[strlen(nvinfer->alignment_pic_path)+100];
+    char image_origin_name[strlen(nvinfer->alignment_pic_path)+100];
+    sprintf(image_aligned_name, "%s/frame-%d:object-%d:aligned.png", nvinfer->alignment_pic_path, frame_meta->frame_num, object_meta->object_id);  
+    sprintf(image_frame_name, "%s/frame-%d:object-%d:frame.png", nvinfer->alignment_pic_path, frame_meta->frame_num, object_meta->object_id); 
+    sprintf(image_origin_name, "%s/frame-%d:object-%d:origin.png", nvinfer->alignment_pic_path, frame_meta->frame_num, object_meta->object_id); 
+    cv::imwrite(image_aligned_name, aligned); 
+    cv::imwrite(image_origin_name, cropped); 
+    cv::imwrite(image_frame_name, whole_frame); 
+  }
+
+  LockGMutex locker (nvinfer->process_lock);
+  /* Push the batch info structure in the processing queue and notify the output
+   * thread that a new batch has been queued. */
+  g_queue_push_tail (nvinfer->input_queue, batch);
+  g_cond_broadcast (&nvinfer->process_cond);
+  return TRUE;
+}
 
 /* Process entire frames in the batched buffer. */
 static GstFlowReturn
@@ -2583,6 +1821,7 @@ cleanup_history_map (GstNvInfer * nvinfer, GstBuffer * inbuf)
   }
 }
 
+
 /* Function to decide if object should be inferred on. */
 static inline gboolean
 should_infer_object (GstNvInfer * nvinfer, GstBuffer * inbuf,
@@ -2592,16 +1831,21 @@ should_infer_object (GstNvInfer * nvinfer, GstBuffer * inbuf,
   if (nvinfer->operate_on_gie_id > -1 &&
       obj_meta->unique_component_id != nvinfer->operate_on_gie_id)
     return FALSE;
+
   if (obj_meta->rect_params.width < nvinfer->min_input_object_width)
     return FALSE;
+
   if (obj_meta->rect_params.height < nvinfer->min_input_object_height)
     return FALSE;
+
   if (nvinfer->max_input_object_width > 0 &&
       obj_meta->rect_params.width > nvinfer->max_input_object_width)
     return FALSE;
+
   if (nvinfer->max_input_object_height > 0 &&
       obj_meta->rect_params.height > nvinfer->max_input_object_height)
     return FALSE;
+
   /* Infer on object if the operate_on_class_ids list is empty or if
    * the flag at index  class_id is TRUE. */
   if (!nvinfer->operate_on_class_ids->empty () &&
@@ -2609,6 +1853,7 @@ should_infer_object (GstNvInfer * nvinfer, GstBuffer * inbuf,
           nvinfer->operate_on_class_ids->at (obj_meta->class_id) == FALSE)) {
     return FALSE;
   }
+
   if (history && IS_CLASSIFIER_INSTANCE (nvinfer)) {
     gboolean should_reinfer = FALSE;
 
@@ -2626,6 +1871,7 @@ should_infer_object (GstNvInfer * nvinfer, GstBuffer * inbuf,
 
     return should_reinfer;
   }
+
   if (history && IS_DETECTOR_INSTANCE (nvinfer)) {
     gboolean should_reinfer = FALSE;
 
@@ -2633,8 +1879,10 @@ should_infer_object (GstNvInfer * nvinfer, GstBuffer * inbuf,
          nvinfer->secondary_reinfer_interval ||
          nvinfer->secondary_reinfer_interval == DEFAULT_REINFER_INTERVAL)
       should_reinfer = TRUE;
+
     return should_reinfer;
   }
+
   return TRUE;
 }
 
@@ -2658,32 +1906,6 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
   gdouble scale_ratio_x, scale_ratio_y;
   guint offset_left = 0, offset_top = 0;
   gboolean warn_untracked_object = FALSE;
-  std::vector<FaceInfo>  face_res;
-  std::vector<PlateInfo> plate_res;
-  bool front_face = false;
-  bool is_exists = false;
-  bool lmk_flag = false;
-  float face[5][2]={0};
-
-  if (nvinfer->alignment_pics && INIT_SIGNAL){
-    if(nvinfer->alignment_debug_level == 3){
-    spdlog::set_level(spdlog::level::trace);
-    } else if(nvinfer->alignment_debug_level == 2) {
-      spdlog::set_level(spdlog::level::debug);
-    } else if(nvinfer->alignment_debug_level == 1) {
-      spdlog::set_level(spdlog::level::info);
-    } else if(nvinfer->alignment_debug_level == 0) {
-      spdlog::set_level(spdlog::level::warn);
-    }  
-    std::string image_path = "images";
-    mkdir_pics(image_path);
-    std::string before_image_path = "images/before";
-    mkdir_pics(before_image_path);
-    std::string aligned = "images/aligned";
-    mkdir_pics(aligned);
-    INIT_SIGNAL = 0;
-
-  }
 
   NvDsBatchMeta *batch_meta = gst_buffer_get_nvds_batch_meta (inbuf);
   if (batch_meta == nullptr) {
@@ -2696,6 +1918,7 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
       l_frame = l_frame->next) {
     NvDsFrameMeta *frame_meta = (NvDsFrameMeta *) (l_frame->data);
     GstNvInferSourceInfo *source_info = nullptr;
+
     /* Find the source info instance. */
     auto iter = nvinfer->source_info->find (frame_meta->pad_index);
     if (iter == nvinfer->source_info->end ()) {
@@ -2709,34 +1932,6 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
     }
     source_info->last_seen_frame_num = frame_meta->frame_num;
 
-    // if landmarks is generated by pgie, the user-meta data is in frame-meta data
-    if(nvinfer->alignment_parent == 1){
-      if (frame_meta->num_obj_meta){
-        try
-        {
-          NvDsMetaList * l_user = frame_meta->frame_user_meta_list;
-          if (nvinfer->alignment_type == 1){
-            nvinfer->extractor.facelmks(l_user, face_res);
-          }
-          if (nvinfer->alignment_type == 2 || nvinfer->alignment_type == 3){
-            try
-            {
-              lmk_flag = nvinfer->extractor.platelmks(l_user, plate_res);
-            }
-            catch(const std::exception& e)
-            {
-              lmk_flag = false;
-              spdlog::debug("Fail to decode tensor.");
-            }
-          }
-        }
-        catch(const std::exception& e)
-        {
-          std::cerr << e.what() << '\n';
-        }
-      }
-    }
-
     /* Iterate through all the objects. */
     for (NvDsMetaList * l_obj = frame_meta->obj_meta_list; l_obj != NULL;
         l_obj = l_obj->next) {
@@ -2744,6 +1939,16 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
       guint idx;
       std::shared_ptr<GstNvInferObjectHistory> obj_history;
       gulong frame_num = frame_meta->frame_num;
+      /* Custom alignment*/
+      bool valid_landmarks = false;
+      bool is_exists = false;
+      bool lmk_flag = false;
+      // ! 
+      // float face[5][2]={0};
+      float lmks[5][2];
+      unsigned int numCount=0;
+      float landmarks[10] = {0.0};
+      
 
       /* Cannot infer on untracked objects in asynchronous mode. */
       if (nvinfer->classifier_async_mode && object_meta->object_id == UNTRACKED_OBJECT_ID) {
@@ -2812,6 +2017,7 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
         }
       }
 
+
       /* Asynchronous mode. If we have previous results for the tracked object,
        * attach the results. New results will be attached when inference on the
        * object is complete and the object is present in the frame after that. */
@@ -2822,48 +2028,36 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
             obj_history->cached_info);
         obj_history->last_accessed_frame_num = frame_meta->frame_num;
       }
+
       if (!needs_infer) {
         continue;
       }
 
-      if (nvinfer->alignment_type == 1 && nvinfer->alignment_parent == 1) {
-        // once a face was inferred, we won't infer it again until needed.
-        is_exists = check_image_exists(object_meta);
-        if (!is_exists){
-          spdlog::debug("face-{} already be inferred.", object_meta->object_id);
-          continue;
-        }
+      /* Custom Alignment*/
+      if (nvinfer->alignment_type){
+        std::cout<<"line 2039"<<nvinfer->alignment_type<<std::endl;
+        NvDsMetaList * l_user_meta = NULL;
+        NvDsUserMeta *user_meta = NULL;
+        gint *user_meta_data = NULL;
+        for (l_user_meta = object_meta->obj_user_meta_list; l_user_meta != NULL; l_user_meta = l_user_meta->next) {
+          user_meta = (NvDsUserMeta *) (l_user_meta->data);
+          user_meta_data = (gint *)user_meta->user_meta_data;
 
-        // get face landmarks
-        for(auto& r : face_res) {
-          // temporarily we use confidence to match the detections
-          // TODO use bbox for matching
-          if(r.confidence==object_meta->confidence){
-            float r_w = FACE_NETWIDTH / (STREAMMUX_WIDTH * 1.0);
-            float r_h = FACE_NETHEIGHT / (STREAMMUX_HEIGHT * 1.0);
-            if (r_h > r_w) {
-              for(uint i=0;i<5;i++) {
-                //calculate the correct ratio to trans landmarks
-                face[i][0]=r.landmark[i*2] / r_w ;
-                face[i][1]=(r.landmark[i*2 + 1] - (FACE_NETHEIGHT - r_w * STREAMMUX_HEIGHT) / 2) / r_w;
-              }      
-            } else {
-              for(uint i=0;i<5;i++) {
-                face[i][0]=(r.landmark[i*2] - (FACE_NETWIDTH - r_h * STREAMMUX_WIDTH) / 2) / r_h;
-                face[i][1]=r.landmark[i*2 + 1] / r_h;
-              }      
-            }     
+          if(user_meta->base_meta.meta_type == NVDS_USER_OBJECT_META_EXAMPLE){
+            for (unsigned int i=0; i < 10; i++) {
+              if (user_meta_data[i]) {
+                landmarks[i] = (float)user_meta_data[i];
+                std::cout<<landmarks[i]<<" ";
+              }
+            }                      
           }
         }
-        
-        // if it is not a front face, we will drop this
-        front_face = is_front_face(face);
-        if (!front_face){
-          spdlog::debug("face-{} is not a front face won't be inferred.", object_meta->object_id);
-          continue;
-        }
       }
-      
+
+      // valid_landmarks = nvinfer->aligner.validLmks(landmarks, numCount);
+      // if (!valid_landmarks){
+      //     continue;
+      // }
 
       /* Object has a valid tracking id but does not have any history. Create
        * an entry in the map for the object. */
@@ -2906,7 +2100,7 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
         batch->conv_buf = conv_gst_buf;
       }
       idx = batch->frames.size ();
-  
+
       /* Crop, scale and convert the buffer. */
       if (get_converted_buffer (nvinfer, in_surf,
               in_surf->surfaceList + frame_meta->batch_id,
@@ -2918,7 +2112,7 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
             ("Buffer conversion failed"), (NULL));
         return GST_FLOW_ERROR;
       }
-  
+
       /* Adding a frame to the current batch. Set the frames members. */
       GstNvInferFrame frame;
       frame.converted_frame_ptr = memory->frame_memory_ptrs[idx];
@@ -2936,52 +2130,26 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
           frame_meta->batch_id);
       batch->frames.push_back (frame);
 
-      // if user-meta was attached to object-meta, should be extracted here
-      if (nvinfer->alignment_parent == 2){
-        if (nvinfer->alignment_type == 2 or nvinfer->alignment_type == 3){
-          try
-          {
-            /* code */
-            NvDsMetaList * l_user = object_meta->parent->obj_user_meta_list;
-            lmk_flag = nvinfer->extractor.platelmks(l_user, plate_res);
-          }
-          catch(const std::exception& e)
-          {
-            std::cerr << e.what() << '\n';
-          }
-        }
-      }
 
+      /* Custom Alignment*/
+      if (batch->frames.size () == nvinfer->max_batch_size && nvinfer->alignment_type) {
+        if (!convert_batch_and_push_to_input_thread_alignment (nvinfer, batch.get(), memory, frame_meta, object_meta, &object_meta->rect_params, landmarks)) {
+          return GST_FLOW_ERROR;
+        }
+        batch.release ();
+        conv_gst_buf = nullptr;
+        nvinfer->tmp_surf.numFilled = 0;
+      }
       /* Submit batch if the batch size has reached max_batch_size. */
-      if (batch->frames.size () == nvinfer->max_batch_size && nvinfer->alignment_type==1 && front_face && is_exists) {
-        if (!convert_batch_and_push_to_input_thread_face_alignment (nvinfer, batch.get(), memory, frame_meta, object_meta, &object_meta->rect_params, face)) {
-          return GST_FLOW_ERROR;
-        }
-        /* Batch submitted. Set batch to nullptr so that a new GstNvInferBatch
-        * structure can be allocated if required. */
-        batch.release ();
-        conv_gst_buf = nullptr;
-        nvinfer->tmp_surf.numFilled = 0;
-      }
-      else if (batch->frames.size () == nvinfer->max_batch_size && (nvinfer->alignment_type ==2 || nvinfer->alignment_type == 3) && lmk_flag) {
-        if (!convert_batch_and_push_to_input_thread_plate_alignment (nvinfer, batch.get(), memory, frame_meta, object_meta, &object_meta->rect_params, plate_res)) {
-          return GST_FLOW_ERROR;
-        }
-        /* Batch submitted. Set batch to nullptr so that a new GstNvInferBatch
-        * structure can be allocated if required. */
-        batch.release ();
-        conv_gst_buf = nullptr;
-        nvinfer->tmp_surf.numFilled = 0;
-      }
       else if (batch->frames.size () == nvinfer->max_batch_size) {
-        if (!convert_batch_and_push_to_input_thread (nvinfer, batch.get(), memory)) {
-          return GST_FLOW_ERROR;
-        }
-        /* Batch submitted. Set batch to nullptr so that a new GstNvInferBatch
-        * structure can be allocated if required. */
-        batch.release ();
-        conv_gst_buf = nullptr;
-        nvinfer->tmp_surf.numFilled = 0;
+      if (!convert_batch_and_push_to_input_thread (nvinfer, batch.get(), memory)) {
+        return GST_FLOW_ERROR;
+      }
+      /* Batch submitted. Set batch to nullptr so that a new GstNvInferBatch
+       * structure can be allocated if required. */
+      batch.release ();
+      conv_gst_buf = nullptr;
+      nvinfer->tmp_surf.numFilled = 0;
       }
     }
   }
@@ -3601,3 +2769,4 @@ nvinfer_plugin_init (GstPlugin * plugin)
 
 GST_PLUGIN_DEFINE (GST_VERSION_MAJOR, GST_VERSION_MINOR, nvdsgst_infer,
     DESCRIPTION, nvinfer_plugin_init, "6.1", LICENSE, BINARY_PACKAGE, URL)
+

@@ -19,20 +19,20 @@
 #include <unordered_map>
 #include <vector>
 #include <memory>
-#include <map>
+#include <opencv2/opencv.hpp>
+#include <opencv2/imgproc/types_c.h>
 
-// #include "cuda_runtime_api.h"
+#include "cuda_runtime_api.h"
 #include "nvbufsurftransform.h"
 #include <nvdsinfer_context.h>
 
-// #include "gstnvdsinfer.h"
+#include "gstnvdsinfer.h"
 
-// #include "gstnvdsmeta.h"
+#include "gstnvdsmeta.h"
 
 #include "nvtx3/nvToolsExt.h"
-#include "align_functions.h"
 
-#include "tensor_extractor.h"
+#include "align_functions.h"
 
 /* Package and library details required for plugin_init */
 #define PACKAGE "nvinfer"
@@ -68,10 +68,6 @@ enum
   PROP_PROCESS_MODE,
   PROP_CONFIG_FILE_PATH,
   PROP_OPERATE_ON_GIE_ID,
-  PROP_ALIGNMENT_TYPE,
-  PROP_ALIGNMENT_PARENT,
-  PROP_ALIGNMENT_PICS,
-  PROP_ALIGNMENT_DEBUG_LEVEL,
   PROP_OPERATE_ON_CLASS_IDS,
   PROP_FILTER_OUT_CLASS_IDS,
   PROP_MODEL_ENGINEFILE,
@@ -84,6 +80,10 @@ enum
   PROP_OUTPUT_TENSOR_META,
   PROP_OUTPUT_INSTANCE_MASK,
   PROP_INPUT_TENSOR_META,
+  /* Custom Alignment properties*/
+  PROP_OUTPUT_LMKS,
+  PROP_ALIGNMENT_TYPE,
+  PROP_ALIGNMENT_PICS,
   PROP_LAST
 };
 
@@ -270,7 +270,7 @@ struct _GstNvInfer
   gint operate_on_gie_id;
   std::vector<gboolean> *operate_on_class_ids;
   std::set<uint> *filter_out_class_ids;
-  
+
   /** Per source information. */
   std::unordered_map<gint, GstNvInferSourceInfo> *source_info;
   gulong last_map_cleanup_frame_num;
@@ -334,21 +334,10 @@ struct _GstNvInfer
 
   GstNvInferImpl *impl;
 
-  std::map<int, cv::Mat> *crop_data;
-  cv::Mat *cvmat;
-
-  gint processing_width;
-  gint processing_height;
-  NvBufSurface *inter_buf;
-  // Host buffer to store RGB data for use by algorithm
-  void *host_rgb_buf;
-
+  gint enable_output_landmark;
   gint alignment_type;
-  gint alignment_parent;
-  gint alignment_pics;
-  gint alignment_debug_level;
+  gchar * alignment_pic_path;
   alignnamespace::Aligner aligner;
-  extractornamespace::Extractor extractor;
 };
 
 /* GStreamer boilerplate. */

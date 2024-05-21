@@ -11,7 +11,10 @@
 
 #include <cmath>
 #include <cstring>
-#include "gstnvinfer_meta_utils.h"
+#include <sstream>
+#include <vector>
+#include <string>
+#include "gstnvinfer_meta_utils.h" 
 
 static inline int
 get_element_size (NvDsInferDataType data_type)
@@ -27,6 +30,26 @@ get_element_size (NvDsInferDataType data_type)
       return 1;
     default:
       return 0;
+  }
+}
+
+/* copy function set by user. "data" holds a pointer to NvDsUserMeta*/
+static gpointer copy_user_meta(gpointer data, gpointer user_data)
+{
+  NvDsUserMeta *user_meta = (NvDsUserMeta *)data;
+  gint *src_user_metadata = (gint*)user_meta->user_meta_data;
+  gint *dst_user_metadata = (gint*)g_malloc0(ARRAYSIZE * sizeof(gint));
+  memcpy(dst_user_metadata, src_user_metadata, ARRAYSIZE * sizeof(gint));
+  return (gpointer)dst_user_metadata;
+}
+
+/* release function set by user. "data" holds a pointer to NvDsUserMeta*/
+static void release_user_meta(gpointer data, gpointer user_data)
+{
+  NvDsUserMeta *user_meta = (NvDsUserMeta *) data;
+  if(user_meta->user_meta_data) {
+    g_free(user_meta->user_meta_data);
+    user_meta->user_meta_data = NULL;
   }
 }
 
@@ -122,10 +145,45 @@ attach_metadata_detector (GstNvInfer * nvinfer, GstMiniObject * tensor_out_objec
       rect_params.border_color = color_params.border_color;
     }
 
-    if (obj.label)
+    if (obj.label && !nvinfer->enable_output_landmark){
       g_strlcpy (obj_meta->obj_label, obj.label, MAX_LABEL_SIZE);
-    /* display_text requires heap allocated memory. */
-    text_params.display_text = g_strdup (obj.label);
+      /* display_text requires heap allocated memory. */
+      text_params.display_text = g_strdup (obj.label);
+    } else if (obj.label && nvinfer->enable_output_landmark) {
+      std::vector<std::string> tokens;
+      std::stringstream ss(obj.label);
+      std::string token;
+      // 使用逗号解析字符串，第0个是label，后面的是landmark坐标
+      while (std::getline(ss, token, ',')) {
+          token.erase(std::remove_if(token.begin(), token.end(), isspace), token.end());
+          tokens.push_back(token);
+      }
+      g_strlcpy (obj_meta->obj_label, tokens[0].c_str(), MAX_LABEL_SIZE);
+      text_params.display_text = g_strdup (tokens[0].c_str());
+
+      NvDsUserMeta *user_meta = NULL;
+      NvDsMetaType user_meta_type = NVDS_USER_OBJECT_META_EXAMPLE;
+
+      /* Acquire NvDsUserMeta user meta from pool */
+      user_meta = nvds_acquire_user_meta_from_pool(batch_meta);
+      int array_size = 16;
+      gint *user_metadata = (gint*)g_malloc0(array_size * sizeof(gint));
+      for (unsigned int i=0; i < tokens.size()-1;) {
+        user_metadata[i] = (std::stoi(tokens[i+1]) - frame.offset_left)/frame.scale_ratio_x + frame.roi_left;
+        user_metadata[i+1] = (std::stoi(tokens[i+2]) - frame.offset_top)/frame.scale_ratio_y + frame.roi_top;
+        i+=2;
+      }
+      /* Set NvDsUserMeta below */
+      user_meta->user_meta_data = (void *)user_metadata;
+      user_meta->base_meta.meta_type = user_meta_type;
+      user_meta->base_meta.copy_func = (NvDsMetaCopyFunc)copy_user_meta;
+      user_meta->base_meta.release_func = (NvDsMetaReleaseFunc)release_user_meta;
+
+      /* We want to add NvDsUserMeta to frame level */
+      nvds_add_user_meta_to_obj(obj_meta, user_meta);
+
+    }
+
     /* Display text above the left top corner of the object. */
     text_params.x_offset = rect_params.left;
     text_params.y_offset = rect_params.top - 10;

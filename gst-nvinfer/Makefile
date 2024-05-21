@@ -16,7 +16,7 @@ endif
 CXX:= g++
 SRCS:= gstnvinfer.cpp  gstnvinfer_allocator.cpp gstnvinfer_property_parser.cpp \
        gstnvinfer_meta_utils.cpp gstnvinfer_impl.cpp gstnvinfer_yaml_parser.cpp \
-	   align_functions.cpp tensor_extractor.cpp
+	   align_functions.cpp
 INCS:= $(wildcard *.h)
 LIB:=libnvdsgst_infer.so
 
@@ -28,10 +28,6 @@ CFLAGS+= -fPIC -std=c++11 -DDS_VERSION=\"6.1.0\" \
 	 -I /opt/nvidia/deepstream/deepstream-6.1/sources/gst-plugins/gst-nvdspreprocess/include \
 	 -I /opt/nvidia/deepstream/deepstream-6.1/sources/libs/nvdsinfer -DNDEBUG
 
--D_GLIBCXX_USE_CXX11_ABI=0
-CFLAGS+=-I /usr/include/opencv4 
-		
-
 GST_INSTALL_DIR?=/opt/nvidia/deepstream/deepstream-$(NVDS_VERSION)/lib/gst-plugins/
 LIB_INSTALL_DIR?=/opt/nvidia/deepstream/deepstream-$(NVDS_VERSION)/lib/
 
@@ -41,7 +37,6 @@ LIBS := -shared -Wl,-no-undefined \
 LIBS+= -L$(LIB_INSTALL_DIR) -lnvdsgst_helper -lnvdsgst_meta -lnvds_meta \
        -lnvds_infer -lnvbufsurface -lnvbufsurftransform -ldl -lpthread -lyaml-cpp \
        -lcuda -Wl,-rpath,$(LIB_INSTALL_DIR)
-	   
 
 OBJS:= $(SRCS:.cpp=.o)
 

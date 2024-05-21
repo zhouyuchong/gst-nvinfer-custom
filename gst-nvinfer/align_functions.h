@@ -1,3 +1,10 @@
+/*
+ * @Author: zhouyuchong
+ * @Date: 2024-02-26 14:51:58
+ * @Description: 
+ * @LastEditors: zhouyuchong
+ * @LastEditTime: 2024-03-05 17:16:13
+ */
 #ifndef _DAMONZZZ_ALIGNER_H_
 #define _DAMONZZZ_ALIGNER_H_
 
@@ -10,8 +17,8 @@ public:
 	Aligner();
 	~Aligner();
 
-	cv::Mat AlignFace(const cv::Mat & dst);
-	cv::Mat AlignPlate(const cv::Mat & dst, int model_type);
+	cv::Mat Align(const cv::Mat & dst, int model_type);
+	bool validLmks(float landmarks[10], int numCount);
 	
 private:
 	class Impl;

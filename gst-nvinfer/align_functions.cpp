@@ -1,5 +1,4 @@
 #include "align_functions.h"
-#include <iostream>
 
 // default_array use the norm landmarks arcface_src from
 // https://github.com/deepinsight/insightface/blob/master/python-package/insightface/utils/face_align.py
@@ -28,8 +27,8 @@ float standard_plate_lpr3[4][2] = {
 namespace alignnamespace {
 class Aligner::Impl {
 public:
-	cv::Mat AlignFace(const cv::Mat& dst);
-	cv::Mat AlignPlate(const cv::Mat& dst, int model_type);
+	cv::Mat Align(const cv::Mat& dst, int model_type);
+    bool validLmks(float *landmarks, int numCount);
 
 
 private:
@@ -53,41 +52,57 @@ Aligner::~Aligner() {
 	}
 }
 
-cv::Mat Aligner::AlignFace(const cv::Mat & dst) {
-	return impl_->AlignFace(dst);
+cv::Mat Aligner::Align(const cv::Mat & dst, int model_type) {
+	return impl_->Align(dst, model_type);
 }
 
-cv::Mat Aligner::AlignPlate(const cv::Mat & dst, int model_type) {
-	return impl_->AlignPlate(dst, model_type);
+bool Aligner::validLmks(float *landmarks, int numCount) {
+    return impl_->validLmks(landmarks, numCount);
 }
 
-cv::Mat Aligner::Impl::AlignFace(const cv::Mat & dst) {
-	cv::Mat src(5,2,CV_32FC1, standard_face);
-    memcpy(src.data, standard_face, 2 * 5 * sizeof(float));
-	// std::cout << "start align face." << std::endl;
-    cv::Mat M= SimilarTransform(dst, src);
-    // std::cout<<"M:  "<<M<<std::endl;
-    // std::cout << "end align face." << std::endl;
-	return M;
-}
 
-cv::Mat Aligner::Impl::AlignPlate(const cv::Mat & dst, int model_type) {
-    if(model_type == 1) {
+cv::Mat Aligner::Impl::Align(const cv::Mat & dst, int model_type) {
+    if (model_type == 1) {
+        cv::Mat src(5,2,CV_32FC1, standard_face);
+        memcpy(src.data, standard_face, 2 * 5 * sizeof(float));
+        cv::Mat M= SimilarTransform(dst, src);
+        return M;
+    }else if(model_type == 2) {
         cv::Mat src(4,2,CV_32FC1, standard_plate);
         memcpy(src.data, standard_plate, 2 * 4 * sizeof(float));
-        // std::cout << "start align face." << std::endl;
         cv::Mat M= cv::getPerspectiveTransform(dst, src);
         // cv::Mat M= SimilarTransform(dst, src);
         // std::cout << "start align plate." << std::endl;
         // std::cout << "end align face." << std::endl;
         return M;
-    } else if (model_type == 2) {
+    } else if (model_type == 3) {
         cv::Mat src(4,2,CV_32FC1, standard_plate_lpr3);
         memcpy(src.data, standard_plate_lpr3, 2 * 4 * sizeof(float));
         cv::Mat M= cv::getPerspectiveTransform(dst, src);
         return M;
     } 
-	
+}
+
+bool Aligner::Impl::validLmks(float landmarks[10], int numCount) {
+    float lmks[numCount/2][2];
+    for (unsigned int i=0;i<numCount;i++) {
+        lmks[i/2][i%2] = landmarks[i];
+    }
+
+    float width_up   = lmks[1][0] - lmks[0][0];
+    float width_down = lmks[4][0] - lmks[3][0];
+    float height_left  = lmks[3][1] - lmks[0][1];
+    float height_right = lmks[4][1] - lmks[1][1];
+
+    if (lmks[2][0]<(lmks[0][0] + width_up / 5.f) || lmks[2][0]<(lmks[3][0] + width_down / 5.f) || 
+        lmks[2][0]>(lmks[1][0] - width_up / 5.f) || lmks[2][0]>(lmks[4][0] - width_down / 5.f)){
+    return false;
+    }
+    if (lmks[2][1]>(lmks[3][1] - height_left / 5.f) || lmks[2][1]>(lmks[4][1] - height_right / 5.f) || 
+        lmks[2][1]<(lmks[1][1] + height_left / 5.f) || lmks[2][1]<(lmks[0][1] + height_right / 5.f)){
+    return false;
+    }
+    return true;
 }
 
 cv::Mat Aligner::Impl::MeanAxis0(const cv::Mat & src) {
@@ -209,3 +224,5 @@ cv::Mat Aligner::Impl::SimilarTransform(const cv::Mat & src, const cv::Mat & dst
     }
 
 }
+
+

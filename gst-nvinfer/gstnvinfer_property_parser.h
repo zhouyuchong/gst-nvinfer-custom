@@ -122,11 +122,6 @@
 #define CONFIG_GROUP_INFER_INPUT_OBJECT_MAX_WIDTH "input-object-max-width"
 #define CONFIG_GROUP_INFER_INPUT_OBJECT_MAX_HEIGHT "input-object-max-height"
 
-#define CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_TYPE "alignment-type"
-#define CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_PARENT "alignment-parent"
-#define CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_PICS "alignment-pics"
-#define CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_DEBUG_LEVEL "alignment-debug-level"
-
 /** Parameters for filtering objects based on class-id and unique id of the
     detector when operating in secondary mode. */
 #define CONFIG_GROUP_INFER_GIE_ID_FOR_OPERATION "operate-on-gie-id"
@@ -152,6 +147,11 @@
 #define CONFIG_GROUP_INFER_CLASS_ATTRS_BG_COLOR "bg-color"
 #define CONFIG_GROUP_INFER_CLASS_ATTRS_NMS_IOU_THRESHOLD "nms-iou-threshold"
 #define CONFIG_GROUP_INFER_CLASS_ATTRS_TOP_K "topk"
+
+
+#define CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_TYPE "alignment-type"
+#define CONFIG_GROUP_INFER_INPUT_OBJECT_ALIGNMENT_PICS "alignment-pics-path"
+#define CONFIG_GROUP_INFER_ENABLE_OUTPUT_LANDMARK "enable-output-landmark"
 
 gboolean gst_nvinfer_parse_config_file (GstNvInfer *nvinfer,
         NvDsInferContextInitParams *init_params, const gchar * cfg_file_path);

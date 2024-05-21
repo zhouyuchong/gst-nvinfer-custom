@@ -300,14 +300,6 @@ gst_nvinfer_parse_other_attribute_yaml (GstNvInfer * nvinfer,
             val);
         goto done;
     }
-  } else if (pair[0] == "alignment-type"){
-    nvinfer->alignment_type = std::stoi(pair[1]);
-  } else if (pair[0] == "alignment-parent"){
-    nvinfer->alignment_parent = std::stoi(pair[1]);
-  } else if (pair[0] == "alignment-pics"){
-    nvinfer->alignment_pics = std::stoi(pair[1]);
-  } else if (pair[0] == "alignment-debug-level"){
-    nvinfer->alignment_debug_level = std::stoi(pair[1]);
   } else if (pair[0] == "classifier-async-mode") {
       nvinfer->classifier_async_mode = std::stoi(pair[1]);
   } else if (pair[0] == "classifier-type") {
@@ -419,6 +411,14 @@ gst_nvinfer_parse_other_attribute_yaml (GstNvInfer * nvinfer,
         goto done;
     }
     nvinfer->transform_params.transform_filter = (NvBufSurfTransform_Inter) val;
+  } 
+  /* Custom Alignment */
+  else if (pair[0] == "enable-output-landmark"){
+    nvinfer->enable_output_landmark = std::stoi(pair[1]);
+  } else if (pair[0] == "alignment-type"){
+    nvinfer->alignment_type = std::stoi(pair[1]);
+  } else if (pair[0] == "alignment-pics-path"){
+    nvinfer->alignment_pic_path = strdup(pair[1].c_str());
   } else {
       g_printerr ("Unknown or legacy key specified '%s' for group property\n", pair[0].c_str());
     }

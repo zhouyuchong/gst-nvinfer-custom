@@ -1,3 +1,10 @@
+/*
+ * @Author: zhouyuchong
+ * @Date: 2024-03-04 15:02:38
+ * @Description: 
+ * @LastEditors: zhouyuchong
+ * @LastEditTime: 2024-03-06 11:33:57
+ */
 /**
  * Copyright (c) 2018-2020, NVIDIA CORPORATION.  All rights reserved.
  *
@@ -11,6 +18,10 @@
 
 #include "gstnvinfer.h"
 #include "gstnvinfer_impl.h"
+
+/** set the user metadata type */
+#define NVDS_USER_OBJECT_META_EXAMPLE (nvds_get_user_meta_type("NVIDIA.NVINFER.USER_META"))
+#define ARRAYSIZE 16
 
 void attach_metadata_detector (GstNvInfer * nvinfer, GstMiniObject * tensor_out_object,
         GstNvInferFrame & frame, NvDsInferDetectionOutput & detection_output,
