@@ -38,8 +38,8 @@ static gpointer copy_user_meta(gpointer data, gpointer user_data)
 {
   NvDsUserMeta *user_meta = (NvDsUserMeta *)data;
   gint *src_user_metadata = (gint*)user_meta->user_meta_data;
-  gint *dst_user_metadata = (gint*)g_malloc0(ARRAYSIZE * sizeof(gint));
-  memcpy(dst_user_metadata, src_user_metadata, ARRAYSIZE * sizeof(gint));
+  gint *dst_user_metadata = (gint*)g_malloc0(10 * sizeof(gint));
+  memcpy(dst_user_metadata, src_user_metadata, 10 * sizeof(gint));
   return (gpointer)dst_user_metadata;
 }
 
@@ -51,6 +51,21 @@ static void release_user_meta(gpointer data, gpointer user_data)
     g_free(user_meta->user_meta_data);
     user_meta->user_meta_data = NULL;
   }
+}
+
+void *set_metadata_ptr(const std::vector<std::string>& tokens, GstNvInfer * nvinfer, NvDsObjectMeta *parent_obj_meta, GstNvInferFrame & frame){
+  gint *user_metadata = (gint*)g_malloc0(10 * sizeof(gint));
+  for (unsigned int i=0; i < tokens.size()-1;) {
+    user_metadata[i] = int((std::stoi(tokens[i+1]) - frame.offset_left)/frame.scale_ratio_x + frame.roi_left);
+    user_metadata[i+1] = int((std::stoi(tokens[i+2]) - frame.offset_top)/frame.scale_ratio_y + frame.roi_top);
+    
+    if(!nvinfer->process_full_frame) {
+      user_metadata[i] += parent_obj_meta->rect_params.left;
+      user_metadata[i+1] += parent_obj_meta->rect_params.top;
+    }
+    i+=2;
+  }
+  return (void *)user_metadata;
 }
 
 /**
@@ -164,17 +179,15 @@ attach_metadata_detector (GstNvInfer * nvinfer, GstMiniObject * tensor_out_objec
       NvDsUserMeta *user_meta = NULL;
       NvDsMetaType user_meta_type = NVDS_USER_OBJECT_META_EXAMPLE;
 
+      NvDsBatchMeta *obj_batch_meta = obj_meta->base_meta.batch_meta;
+
       /* Acquire NvDsUserMeta user meta from pool */
-      user_meta = nvds_acquire_user_meta_from_pool(batch_meta);
-      int array_size = 16;
-      gint *user_metadata = (gint*)g_malloc0(array_size * sizeof(gint));
-      for (unsigned int i=0; i < tokens.size()-1;) {
-        user_metadata[i] = (std::stoi(tokens[i+1]) - frame.offset_left)/frame.scale_ratio_x + frame.roi_left;
-        user_metadata[i+1] = (std::stoi(tokens[i+2]) - frame.offset_top)/frame.scale_ratio_y + frame.roi_top;
-        i+=2;
-      }
+      user_meta = nvds_acquire_user_meta_from_pool(obj_batch_meta);
+      // std::cout<<"in attach detector"<<std::endl;
+      // std::cout<<rect_params.left<<" "<<rect_params.top<<" "<<rect_params.width<<" "<<rect_params.height<<std::endl;
+
       /* Set NvDsUserMeta below */
-      user_meta->user_meta_data = (void *)user_metadata;
+      user_meta->user_meta_data = (void *)set_metadata_ptr(tokens, nvinfer, parent_obj_meta, frame);
       user_meta->base_meta.meta_type = user_meta_type;
       user_meta->base_meta.copy_func = (NvDsMetaCopyFunc)copy_user_meta;
       user_meta->base_meta.release_func = (NvDsMetaReleaseFunc)release_user_meta;

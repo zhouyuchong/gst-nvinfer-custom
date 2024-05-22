@@ -1515,14 +1515,19 @@ get_images(GstNvInfer *nvinfer, NvDsObjectMeta *object_meta, float pic_width, fl
     out_mat.copyTo(whole_frame);
 
     // Draw bbox and lmk points
-    // cv::rectangle(out_mat,cvPoint(int(object_meta->rect_params.left),int(object_meta->rect_params.top)),cvPoint(int(object_meta->rect_params.left + object_meta->rect_params.width),int(object_meta->rect_params.top + object_meta->rect_params.height)),cv::Scalar(255,0,0),1,1,0);
-    // for(int i=0;i<5;i++){
+    // std::cout<<"drawing"<<std::endl;
+    // std::cout<<int(object_meta->parent->rect_params.left)<<" "<<int(object_meta->parent->rect_params.top)<<" "<<int(object_meta->parent->rect_params.width)<<" "<<int(object_meta->parent->rect_params.height)<<std::endl;
+    // std::cout<<int(object_meta->rect_params.left)<<" "<<int(object_meta->rect_params.top)<<" "<<int(object_meta->rect_params.width)<<" "<<int(object_meta->rect_params.height)<<std::endl;
+    // cv::rectangle(whole_frame,cvPoint(int(object_meta->rect_params.left),int(object_meta->rect_params.top)),cvPoint(int(object_meta->rect_params.left + object_meta->rect_params.width),int(object_meta->rect_params.top + object_meta->rect_params.height)),cv::Scalar(255,0,0),1,1,0);
+    // for(int i=0;i<4;i++){
     //   cv::Point centerCircle1(matrix[i][0], matrix[i][1]);
+    //   std::cout<<matrix[i][0]<<" "<<matrix[i][1]<<std::endl;
     //   int radiusCircle = 1;
     //   cv::Scalar colorCircle1(0, 0, 255); // (B, G, R)
     //   int thicknessCircle1 = 1;
-    //   cv::circle(out_mat, centerCircle1, radiusCircle, colorCircle1, thicknessCircle1);
+    //   cv::circle(whole_frame, centerCircle1, radiusCircle, colorCircle1, thicknessCircle1);
     // }
+    // std::cout<<std::endl;
 
     cv::Rect rect(x1, y1, (x2-x1), (y2-y1));                              
 	  cv::Mat roiImage = out_mat(rect);
@@ -1562,9 +1567,9 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M, int align_type, int id, cv:
       cv::Mat transfer_mat = M(cv::Rect(0, 0, 3, 2));
       cv::warpAffine(whole_frame, frame, transfer_mat, cv::Size(112, 112), 1, 0, 0);
     } else if (align_type == 2){
-      cv::Mat frame_rgb = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
-      cv::cvtColor(whole_frame, frame_rgb, CV_RGBA2RGB);
-      cv::warpPerspective(frame_rgb, frame, M, cv::Size(94, 24), 2, 1, 0);
+      // cv::Mat frame_rgb = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
+      // cv::cvtColor(whole_frame, frame_rgb, CV_RGBA2RGB);
+      cv::warpPerspective(whole_frame, frame, M, cv::Size(94, 24), 1, 0, 0);
     } else if (align_type == 3){
       cv::Mat frame_rgb = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
       cv::cvtColor(whole_frame, frame_rgb, CV_RGBA2RGB);
@@ -2035,21 +2040,23 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
 
       /* Custom Alignment*/
       if (nvinfer->alignment_type){
-        std::cout<<"line 2039"<<nvinfer->alignment_type<<std::endl;
         NvDsMetaList * l_user_meta = NULL;
         NvDsUserMeta *user_meta = NULL;
         gint *user_meta_data = NULL;
         for (l_user_meta = object_meta->obj_user_meta_list; l_user_meta != NULL; l_user_meta = l_user_meta->next) {
           user_meta = (NvDsUserMeta *) (l_user_meta->data);
           user_meta_data = (gint *)user_meta->user_meta_data;
-
+          lmk_flag = true;
           if(user_meta->base_meta.meta_type == NVDS_USER_OBJECT_META_EXAMPLE){
+            // std::cout<<"in get usermeta"<<std::endl;
             for (unsigned int i=0; i < 10; i++) {
+              // std::cout<<user_meta_data[i]<<" ";
               if (user_meta_data[i]) {
                 landmarks[i] = (float)user_meta_data[i];
-                std::cout<<landmarks[i]<<" ";
+                // std::cout<<landmarks[i]<<" ";
               }
-            }                      
+            }
+            // std::cout<<std::endl;                      
           }
         }
       }
@@ -2130,9 +2137,8 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
           frame_meta->batch_id);
       batch->frames.push_back (frame);
 
-
       /* Custom Alignment*/
-      if (batch->frames.size () == nvinfer->max_batch_size && nvinfer->alignment_type) {
+      if (batch->frames.size () == nvinfer->max_batch_size && nvinfer->alignment_type && lmk_flag) {
         if (!convert_batch_and_push_to_input_thread_alignment (nvinfer, batch.get(), memory, frame_meta, object_meta, &object_meta->rect_params, landmarks)) {
           return GST_FLOW_ERROR;
         }

@@ -519,7 +519,6 @@ DetectPostprocessor::fillUnclusteredOutput(NvDsInferDetectionOutput& output)
             object.confidence = obj.detectionConfidence;
             if(obj.classId < m_Labels.size() && m_Labels[obj.classId].size() > 0){
                 if (obj.numLmks) {
-                    std::cout<<obj.landmark[0]<<std::endl;
                     std::string label_str = m_Labels[obj.classId][0];
                     std::stringstream ss;
                     ss<<label_str<<",";
@@ -534,7 +533,6 @@ DetectPostprocessor::fillUnclusteredOutput(NvDsInferDetectionOutput& output)
                         free(object.label);
                     }
                     object.label = strdup(final_str.c_str());
-                    std::cout<<"nvinfer: "<<object.label<<std::endl;
                 } else {
                     object.label = strdup(m_Labels[obj.classId][0].c_str());
                 }
