@@ -3,7 +3,7 @@
  * @Date: 2024-02-26 14:51:58
  * @Description: 
  * @LastEditors: zhouyuchong
- * @LastEditTime: 2024-05-21 16:24:48
+ * @LastEditTime: 2024-05-22 15:51:57
 -->
 # Custom gst-nvinfer (DEMO)
 This is a custom gst-nvinfer plugin to do some preprocess and postprocess.
@@ -28,13 +28,14 @@ for detector
 3. decode landmarks in `attach_metadata_detector` and attach them to user metadata
 
 for classifier
+
 3. decode landmarks in object_user_metadata
 4. use opencv to do alignment and replace original surface in gpu memory
 5. Done!
 
 ## Usage
 **A backup is strongly recommended!!!!**
-1. replace `nvdsinfer.h`. It's under `/opt/nvidia/deepstream/deepstream-6.1/sources/includes` in official docker.
+1. replace `nvdsinfer.h`. It's under `/opt/nvidia/deepstream/deepstream/sources/includes` in official docker.
 2. set cuda environment
 ```
 export CUDA_VER=11.6
@@ -67,6 +68,9 @@ use kyewords
 + alignment-type: 
   + 1: face -> [Retinaface](https://github.com/wang-xinyu/tensorrtx/tree/master/retinaface)
   + 2: license plate -> [Retina_License_Plate](https://github.com/gm19900510/Pytorch_Retina_License_Plate)
++ alignment-pics-path:
+  path to save pictures
+
 
 Example
 ```
