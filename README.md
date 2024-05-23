@@ -3,7 +3,7 @@
  * @Date: 2024-02-26 14:51:58
  * @Description: 
  * @LastEditors: zhouyuchong
- * @LastEditTime: 2024-05-23 14:25:12
+ * @LastEditTime: 2024-05-23 14:34:51
 -->
 # Custom gst-nvinfer (DEMO)
 This is a custom gst-nvinfer plugin to do some preprocess and postprocess.
@@ -59,6 +59,10 @@ make install
 
 6. set config file
 
+for all detectors, set `cluster-mode=4` since we only modify `fillUnclusteredOutput`.
+```
+cluster-mode=4
+```
 for detector which output landmarks
 ```
 enable-output-landmark = 1
