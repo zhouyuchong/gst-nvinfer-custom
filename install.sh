@@ -3,7 +3,7 @@
  # @Date: 2024-05-21 16:47:58
  # @Description: 
  # @LastEditors: zhouyuchong
- # @LastEditTime: 2024-05-23 10:44:27
+ # @LastEditTime: 2024-05-23 15:37:00
 ### 
 
 log() {
@@ -28,25 +28,25 @@ else
   mkdir backup
 fi
 
-if [ ! "$CUR_DIR/backup/libnvds_infer.so" ]; then
+if [ ! -f "$CUR_DIR/backup/libnvds_infer.so" ]; then
     log "[INFO]backup libnvds_infer.so"
-    mv /opt/nvidia/deepstream/deepstream/lib/libnvds_infer.so ./backup/libnvds_infer.so
+    mv /opt/nvidia/deepstream/deepstream/lib/libnvds_infer.so ./backup/
 else
     log "[INFO]libnvds_infer.so already backup"
 fi
 
-if [ ! "$CUR_DIR/backup/libnvdsgst_infer.so" ]; then
+if [ ! -f "$CUR_DIR/backup/libnvdsgst_infer.so" ]; then
     log "[INFO]backup libnvdsgst_infer.so"
     mv /opt/nvidia/deepstream/deepstream/lib/gst-plugins/libnvdsgst_infer.so ./backup/libnvdsgst_infer.so
 else
     log "[INFO]libnvdsgst_infer.so already backup"
 fi
 
-if [ ! "$CUR_DIR/backup/nvdsinfer.so" ]; then
-    log "[INFO]backup nvdsinfer.so"
+if [ ! -f "$CUR_DIR/backup/nvdsinfer.h" ]; then
+    log "[INFO]backup nvdsinfer.h"
     mv /opt/nvidia/deepstream/deepstream/sources/includes/nvdsinfer.h ./backup/nvdsinfer.h
 else
-    log "[INFO]nvdsinfer.so already backup"
+    log "[INFO]nvdsinfer.h already backup"
 fi
 
 cuda_version=$(nvcc --version | grep -oP 'V\K\d+\.\d+')
