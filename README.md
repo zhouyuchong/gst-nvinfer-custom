@@ -3,7 +3,7 @@
  * @Date: 2024-02-26 14:51:58
  * @Description: 
  * @LastEditors: zhouyuchong
- * @LastEditTime: 2024-05-22 15:51:57
+ * @LastEditTime: 2024-05-23 14:25:12
 -->
 # Custom gst-nvinfer (DEMO)
 This is a custom gst-nvinfer plugin to do some preprocess and postprocess.
@@ -85,4 +85,5 @@ Saved input NvBufSurface
 ![plate](./images/plate.png)
 
 ## TODO
-use [npp](https://docs.nvidia.com/cuda/npp/group__affine__transform.html#ga5e722e6c67349032d4cacda4a696c237) to do alignment
++ use [npp](https://docs.nvidia.com/cuda/npp/group__affine__transform.html#ga5e722e6c67349032d4cacda4a696c237) to do alignment
++ improve stucture of passing lmks

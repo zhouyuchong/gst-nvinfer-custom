@@ -80,7 +80,10 @@ cv::Mat Aligner::Impl::Align(const cv::Mat & dst, int model_type) {
         memcpy(src.data, standard_plate_lpr3, 2 * 4 * sizeof(float));
         cv::Mat M= cv::getPerspectiveTransform(dst, src);
         return M;
-    } 
+    } else {
+        std::cout << "model type error." << std::endl;
+        return cv::Mat();
+    }
 }
 
 bool Aligner::Impl::validLmks(float landmarks[10], int numCount) {

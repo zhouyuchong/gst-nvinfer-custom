@@ -20,6 +20,7 @@
 #include <list>
 #include <thread>
 #include <vector>
+#include <iostream>
 
 #include "gst-nvevent.h"
 #include "gstnvdsmeta.h"
@@ -1660,9 +1661,16 @@ convert_batch_and_push_to_input_thread_alignment (GstNvInfer *nvinfer,
     char image_aligned_name[strlen(nvinfer->alignment_pic_path)+100];
     char image_frame_name[strlen(nvinfer->alignment_pic_path)+100];
     char image_origin_name[strlen(nvinfer->alignment_pic_path)+100];
-    sprintf(image_aligned_name, "%s/frame-%d:object-%d:aligned.png", nvinfer->alignment_pic_path, frame_meta->frame_num, object_meta->object_id);  
-    sprintf(image_frame_name, "%s/frame-%d:object-%d:frame.png", nvinfer->alignment_pic_path, frame_meta->frame_num, object_meta->object_id); 
-    sprintf(image_origin_name, "%s/frame-%d:object-%d:origin.png", nvinfer->alignment_pic_path, frame_meta->frame_num, object_meta->object_id); 
+    int obj_id = 0;
+    if (nvinfer->alignment_type == 1) {
+      obj_id = object_meta->object_id;
+    } else if (nvinfer->alignment_type == 2) {
+      obj_id = object_meta->parent->object_id;
+    }
+    // std::cout<<nvinfer->alignment_pic_path<<std::endl;
+    sprintf(image_frame_name, "%s/frame-%d:object-%d:1-frame.png", nvinfer->alignment_pic_path, frame_meta->frame_num, obj_id); 
+    sprintf(image_aligned_name, "%s/frame-%d:object-%d:3-aligned.png", nvinfer->alignment_pic_path, frame_meta->frame_num, obj_id);  
+    sprintf(image_origin_name, "%s/frame-%d:object-%d:2-origin.png", nvinfer->alignment_pic_path, frame_meta->frame_num, obj_id); 
     cv::imwrite(image_aligned_name, aligned); 
     cv::imwrite(image_origin_name, cropped); 
     cv::imwrite(image_frame_name, whole_frame); 
@@ -2322,7 +2330,7 @@ gst_nvinfer_process_tensor_input (GstNvInfer * nvinfer, GstBuffer * inbuf,
       input_batch.returnInputFunc = nullptr;
 
       for (auto &tensor : tensors)
-        tensor.dims.d[0] = batch->frames.size();
+        tensor.inferDims.d[0] = batch->frames.size();
 
       NvDsInferStatus status =
           DS_NVINFER_IMPL (nvinfer)->m_InferCtx->
