@@ -1568,13 +1568,9 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M, int align_type, int id, cv:
       cv::Mat transfer_mat = M(cv::Rect(0, 0, 3, 2));
       cv::warpAffine(whole_frame, frame, transfer_mat, cv::Size(112, 112), 1, 0, 0);
     } else if (align_type == 2){
-      // cv::Mat frame_rgb = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
-      // cv::cvtColor(whole_frame, frame_rgb, CV_RGBA2RGB);
       cv::warpPerspective(whole_frame, frame, M, cv::Size(94, 24), 1, 0, 0);
     } else if (align_type == 3){
-      cv::Mat frame_rgb = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
-      cv::cvtColor(whole_frame, frame_rgb, CV_RGBA2RGB);
-      cv::warpPerspective(frame_rgb, frame, M, cv::Size(160, 48), 2, 1, 0);
+      cv::warpPerspective(whole_frame, frame, M, cv::Size(168, 48), 1, 0, 0);
     }
 
     auto CheckPoint_alignment = std::chrono::system_clock::now();
