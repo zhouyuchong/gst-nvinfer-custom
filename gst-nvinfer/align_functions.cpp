@@ -19,9 +19,9 @@ float standard_plate[4][2] = {
 
 float standard_plate_lpr3[4][2] = {
             {0.0f, 0.0f},
-			{160.0f, 0.0f},
+			{168.0f, 0.0f},
 			{0.0f, 48.0f},
-			{160.0f, 48.0f}
+			{168.0f, 48.0f}
 		};
 
 namespace alignnamespace {
@@ -78,6 +78,7 @@ cv::Mat Aligner::Impl::Align(const cv::Mat & dst, int model_type) {
     } else if (model_type == 3) {
         cv::Mat src(4,2,CV_32FC1, standard_plate_lpr3);
         memcpy(src.data, standard_plate_lpr3, 2 * 4 * sizeof(float));
+        // std::cout<<(dst.checkVector(2, CV_32F) == 4)<<" "<<(src.checkVector(2, CV_32F) == 4)<<std::endl;
         cv::Mat M= cv::getPerspectiveTransform(dst, src);
         return M;
     } else {

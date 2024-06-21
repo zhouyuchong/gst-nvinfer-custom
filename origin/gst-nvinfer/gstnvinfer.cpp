@@ -20,7 +20,6 @@
 #include <list>
 #include <thread>
 #include <vector>
-#include <iostream>
 
 #include "gst-nvevent.h"
 #include "gstnvdsmeta.h"
@@ -95,14 +94,6 @@ static GQuark _dsmeta_quark = 0;
 #define DEFAULT_OUTPUT_INSTANCE_MASK FALSE
 #define DEFAULT_INPUT_TENSOR_META FALSE
 
-/* Custom Alignment */
-#define DEFAULT_ALIGNMENT_TYPE 0
-#define DEFAULT_OUTPUT_LMKS 0
-#define DEFAULT_ALIGNMENT_PICS ""
-#define DEFAULT_ALIGNMENT_NET_WIDTH 0
-#define DEFAULT_ALIGNMENT_NET_HEIGHT 0
-
-
 /* By default NVIDIA Hardware allocated memory flows through the pipeline. We
  * will be processing on this type of memory only. */
 #define GST_CAPS_FEATURE_MEMORY_NVMM "memory:NVMM"
@@ -121,15 +112,6 @@ guint gst_nvinfer_signals[LAST_SIGNAL] = { 0 };
 /* Define our element type. Standard GObject/GStreamer boilerplate stuff */
 #define gst_nvinfer_parent_class parent_class
 G_DEFINE_TYPE (GstNvInfer, gst_nvinfer, GST_TYPE_BASE_TRANSFORM);
-
-#define CHECK_CUDA_STATUS(cuda_status,error_str) do { \
-  if ((cuda_status) != cudaSuccess) { \
-    g_print ("Error: %s in %s at line %d (%s)\n", \
-        error_str, __FILE__, __LINE__, cudaGetErrorName(cuda_status)); \
-  } \
-} while (0)
-
-#define CLIP(a, min, max) (MAX(MIN(a, max), min))
 
 /* Implementation of the GObject/GstBaseTransform interfaces. */
 static void gst_nvinfer_finalize (GObject * object);
@@ -342,29 +324,6 @@ gst_nvinfer_class_init (GstNvInferClass * klass)
           (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
               GST_PARAM_MUTABLE_READY)));
 
-  g_object_class_install_property (gobject_class, PROP_OUTPUT_LMKS,
-      g_param_spec_int ("enable-output-landmark", "Enable output with landmarks by detector",
-          "Add landmarks into object metadata.\n"
-          "\t\t\tSet to 1 to enable.",
-          -1, G_MAXINT, DEFAULT_OUTPUT_LMKS,
-          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
-              GST_PARAM_MUTABLE_READY)));
-
-  g_object_class_install_property (gobject_class, PROP_ALIGNMENT_TYPE,
-      g_param_spec_int ("alignment-type", "Alignment type",
-          "Align surfaces before feed into infer.\n"
-          "\t\t\tSet to 1 for face and to 2 for license plate.",
-          -1, G_MAXINT, DEFAULT_ALIGNMENT_TYPE,
-          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
-              GST_PARAM_MUTABLE_READY)));
-
-  g_object_class_install_property (gobject_class, PROP_ALIGNMENT_PICS,
-      g_param_spec_string ("alignment-pic-path", "Save Image Path",
-          "Path",
-          DEFAULT_ALIGNMENT_PICS,
-          (GParamFlags) (G_PARAM_READWRITE | G_PARAM_STATIC_STRINGS |
-              GST_PARAM_MUTABLE_PLAYING)));
-
   /** install signal MODEL_UPDATED */
   gst_nvinfer_signals[SIGNAL_MODEL_UPDATED] =
       g_signal_new ("model-updated",
@@ -425,11 +384,6 @@ gst_nvinfer_init (GstNvInfer * nvinfer)
   nvinfer->transform_config_params.compute_mode = NvBufSurfTransformCompute_Default;
   nvinfer->transform_params.transform_filter = NvBufSurfTransformInter_Default;
 
-  /* Custom Alignment*/
-  nvinfer->enable_output_landmark = DEFAULT_OUTPUT_LMKS;
-  nvinfer->alignment_type = DEFAULT_ALIGNMENT_TYPE;
-  nvinfer->alignment_pic_path = g_strdup (DEFAULT_ALIGNMENT_PICS);
-
   /* Create processing lock and condition for synchronization.*/
   g_mutex_init (&nvinfer->process_lock);
   g_cond_init (&nvinfer->process_cond);
@@ -457,8 +411,6 @@ gst_nvinfer_finalize (GObject * object)
   delete nvinfer->filter_out_class_ids;
 
   delete DS_NVINFER_IMPL(nvinfer);
-
-  g_free(nvinfer->alignment_pic_path);
 
   G_OBJECT_CLASS (parent_class)->finalize (object);
 }
@@ -593,17 +545,6 @@ gst_nvinfer_set_property (GObject * object, guint prop_id,
       impl->m_InitParams->inputFromPreprocessedTensor =
           g_value_get_boolean (value);
       break;
-
-    /* Custom Alignment*/
-    case PROP_OUTPUT_LMKS:
-      nvinfer->enable_output_landmark = g_value_get_int (value);
-      break;
-    case PROP_ALIGNMENT_TYPE:
-      nvinfer->alignment_type = g_value_get_int (value);
-      break;
-    case PROP_ALIGNMENT_PICS:
-      nvinfer->alignment_pic_path = g_value_dup_string (value);
-      break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
       break;
@@ -683,17 +624,6 @@ gst_nvinfer_get_property (GObject * object, guint prop_id,
       break;
     case PROP_INPUT_TENSOR_META:
       g_value_set_boolean (value, nvinfer->input_tensor_from_meta);
-      break;
-    
-    /* Custom Alignment*/
-    case PROP_OUTPUT_LMKS:
-      g_value_set_int (value, nvinfer->enable_output_landmark);
-      break;
-    case PROP_ALIGNMENT_TYPE:
-      g_value_set_int (value, nvinfer->alignment_type);
-      break;
-    case PROP_ALIGNMENT_PICS:
-      g_value_set_string (value, nvinfer->alignment_pic_path);
       break;
     default:
       G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -1470,218 +1400,6 @@ convert_batch_and_push_to_input_thread (GstNvInfer *nvinfer,
   return TRUE;
 }
 
-static std::tuple<cv::Mat, cv::Mat>
-get_images(GstNvInfer *nvinfer, NvDsObjectMeta *object_meta, float pic_width, float pic_height, float matrix[][2]=NULL){ 
-  NvBufSurface * surface = &nvinfer->tmp_surf;
-  for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
-    gint frame_width = (gint)surface->surfaceList[frameIndex].width;
-    gint frame_height = (gint)surface->surfaceList[frameIndex].height;
-
-    void *src_data = NULL;
-    CHECK_CUDA_STATUS (cudaMallocHost (&src_data,
-                                       surface->surfaceList[frameIndex].dataSize), "Could not allocate cuda host buffer");
-
-
-    if (src_data == NULL) {
-    g_print("Error: failed to malloc src_data \n");
-    }
-    auto start = std::chrono::system_clock::now();
-    cudaMemcpy((void *)src_data,
-        (void *)surface->surfaceList[frameIndex].dataPtr,
-        surface->surfaceList[frameIndex].dataSize,
-        cudaMemcpyDeviceToHost);
-    auto end = std::chrono::system_clock::now();
-    size_t frame_step = surface->surfaceList[frameIndex].pitch;
-
-    // printf("colorformat =%d\n", surface->surfaceList[frameIndex].colorFormat);
-    cv::Mat out_mat;
-    int colorFormat = surface->surfaceList[frameIndex].colorFormat;
-    // GST_DEBUG_OBJECT(nvinfer, "Origin frame color format:%d.", colorFormat);
-    if(colorFormat == 7 || colorFormat == 33){
-      cv::Mat frame = cv::Mat(frame_height + frame_height/2, frame_width, CV_8UC1, src_data, frame_step);
-      out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC4);
-      cv::cvtColor(frame, out_mat, CV_YUV2RGB_NV21);
-    } else{
-      cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC4, src_data, frame_step);
-      out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC3);
-      cv::cvtColor(frame, out_mat, CV_RGBA2BGR);
-    }
-    
-    int x1 = int(CLIP(object_meta->rect_params.left - pic_width, 0, out_mat.size().width));
-    int y1 = int(CLIP(object_meta->rect_params.top - pic_height, 0, out_mat.size().height));
-    int x2 = int(CLIP(object_meta->rect_params.left + object_meta->rect_params.width + pic_width, 0, out_mat.size().width));
-    int y2 = int(CLIP(object_meta->rect_params.top + object_meta->rect_params.height + pic_height, 0, out_mat.size().height));
-
-    cv::Mat whole_frame;
-    out_mat.copyTo(whole_frame);
-
-    // Draw bbox and lmk points
-    // std::cout<<"drawing"<<std::endl;
-    // std::cout<<int(object_meta->parent->rect_params.left)<<" "<<int(object_meta->parent->rect_params.top)<<" "<<int(object_meta->parent->rect_params.width)<<" "<<int(object_meta->parent->rect_params.height)<<std::endl;
-    // std::cout<<int(object_meta->rect_params.left)<<" "<<int(object_meta->rect_params.top)<<" "<<int(object_meta->rect_params.width)<<" "<<int(object_meta->rect_params.height)<<std::endl;
-    // cv::rectangle(whole_frame,cvPoint(int(object_meta->rect_params.left),int(object_meta->rect_params.top)),cvPoint(int(object_meta->rect_params.left + object_meta->rect_params.width),int(object_meta->rect_params.top + object_meta->rect_params.height)),cv::Scalar(255,0,0),1,1,0);
-    // for(int i=0;i<4;i++){
-    //   cv::Point centerCircle1(matrix[i][0], matrix[i][1]);
-    //   std::cout<<matrix[i][0]<<" "<<matrix[i][1]<<std::endl;
-    //   int radiusCircle = 1;
-    //   cv::Scalar colorCircle1(0, 0, 255); // (B, G, R)
-    //   int thicknessCircle1 = 1;
-    //   cv::circle(whole_frame, centerCircle1, radiusCircle, colorCircle1, thicknessCircle1);
-    // }
-    // std::cout<<std::endl;
-
-    cv::Rect rect(x1, y1, (x2-x1), (y2-y1));                              
-	  cv::Mat roiImage = out_mat(rect);
-    cv::Mat cropped;
-    roiImage.copyTo(cropped);
-    
-    cudaFreeHost(src_data);
-    return std::make_tuple(cropped, whole_frame);
-  }
-}
-
-static cv::Mat
-align_preprocess(NvBufSurface * surface, cv::Mat &M, int align_type, int id, cv::Mat &whole_frame){
-  for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
-    gint frame_width = (gint)surface->surfaceList[frameIndex].width;
-    gint frame_height = (gint)surface->surfaceList[frameIndex].height;
-
-    void *src_data = NULL;
-    CHECK_CUDA_STATUS (cudaMallocHost (&src_data,
-                                       surface->surfaceList[frameIndex].dataSize), "Could not allocate cuda host buffer");
-
-    if (src_data == NULL) {
-      g_print("Error: failed to malloc src_data \n");
-    }
-    auto start = std::chrono::system_clock::now();
-    cudaMemcpy((void *)src_data,
-        (void *)surface->surfaceList[frameIndex].dataPtr,
-        surface->surfaceList[frameIndex].dataSize,
-        cudaMemcpyDeviceToHost);
-    auto CheckPoint_d2h = std::chrono::system_clock::now();
-
-    size_t frame_step = surface->surfaceList[frameIndex].pitch;
-
-    cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC3, src_data, frame_step);
-    
-    if (align_type == 1){
-      cv::Mat transfer_mat = M(cv::Rect(0, 0, 3, 2));
-      cv::warpAffine(whole_frame, frame, transfer_mat, cv::Size(112, 112), 1, 0, 0);
-    } else if (align_type == 2){
-      cv::warpPerspective(whole_frame, frame, M, cv::Size(94, 24), 1, 0, 0);
-    } else if (align_type == 3){
-      cv::warpPerspective(whole_frame, frame, M, cv::Size(168, 48), 1, 0, 0);
-    }
-
-    auto CheckPoint_alignment = std::chrono::system_clock::now();
-    size_t sizeInBytes = surface->surfaceList[frameIndex].dataSize;
-    cudaMemcpy((void *)surface->surfaceList[frameIndex].dataPtr,
-        frame.ptr(0),
-        sizeInBytes,
-        cudaMemcpyHostToDevice);  
-    auto CheckPoint_h2d = std::chrono::system_clock::now();
-    cudaFreeHost(src_data);
-    return frame;
-  }
-}
-
-
-static gboolean
-convert_batch_and_push_to_input_thread_alignment (GstNvInfer *nvinfer,
-    GstNvInferBatch *batch, GstNvInferMemory *mem, NvDsFrameMeta *frame_meta, 
-    NvDsObjectMeta *object_meta, NvOSD_RectParams * crop_rect_params, float landmarks[ARRAYSIZE])
-{
-  NvBufSurfTransform_Error err = NvBufSurfTransformError_Success;
-  std::string nvtx_str;
-
-  /* Set the transform session parameters for the conversions executed in this
-   * thread. */
-  err = NvBufSurfTransformSetSessionParams (&nvinfer->transform_config_params);
-  if (err != NvBufSurfTransformError_Success) {
-    GST_ELEMENT_ERROR (nvinfer, STREAM, FAILED,
-        ("NvBufSurfTransformSetSessionParams failed with error %d", err), (NULL));
-    return FALSE;
-  }
-
-  nvtxEventAttributes_t eventAttrib = {0};
-  eventAttrib.version = NVTX_VERSION;
-  eventAttrib.size = NVTX_EVENT_ATTRIB_STRUCT_SIZE;
-  eventAttrib.colorType = NVTX_COLOR_ARGB;
-  eventAttrib.color = 0xFFFF0000;
-  eventAttrib.messageType = NVTX_MESSAGE_TYPE_ASCII;
-  nvtx_str = "convert_buf batch_num=" + std::to_string(nvinfer->current_batch_num);
-  eventAttrib.message.ascii = nvtx_str.c_str();
-
-  nvtxDomainRangePushEx(nvinfer->nvtx_domain, &eventAttrib);
-
-  cv::Mat cropped, whole_frame;
-  float pic_width = 0 ;
-  float pic_height = 0 ;
-  // std::cout<<"token 1 ";
-
-  int numNonZeroCount=0;
-  for (unsigned int i=0; i < ARRAYSIZE; i++) {
-    if (landmarks[i]) numNonZeroCount++;
-  }
-
-  float lmks[numNonZeroCount/2][2];
-  for (unsigned int i=0;i<numNonZeroCount;i++) {
-    lmks[i/2][i%2] = landmarks[i];
-  }
-  // std::cout<<"token 2 ";
-  int row = sizeof(lmks) / sizeof(lmks[0]);
-  cv::Mat dst(row ,2, CV_32FC1, lmks);
-  memcpy(dst.data, lmks, 2 * row * sizeof(float));
-  cv::Mat M = nvinfer->aligner.Align(dst, nvinfer->alignment_type);
-  // std::cout<<"token 3 ";
-
-  std::tie(cropped, whole_frame) = get_images(nvinfer, object_meta, pic_width, pic_height, lmks);
-
-  if (batch->frames.size() > 0) {
-    /* Batched tranformation. */
-    // for some reason, if use async, there will be a latency and cause disorder.
-    err = NvBufSurfTransform (&nvinfer->tmp_surf, mem->surf,
-              &nvinfer->transform_params);
-  }
-
-  if (err != NvBufSurfTransformError_Success) {
-    GST_ELEMENT_ERROR (nvinfer, STREAM, FAILED,
-        ("NvBufSurfTransform failed with error %d while converting buffer", err),
-        (NULL));
-    return FALSE;
-  }
-
-  cv::Mat aligned;
-  cv::Mat resizedMat;
-  aligned = align_preprocess(mem->surf, M, nvinfer->alignment_type, object_meta->object_id, whole_frame);
-  // std::cout<<"token 4"<<std::endl;
-  if (strlen(nvinfer->alignment_pic_path)) {
-    char image_aligned_name[strlen(nvinfer->alignment_pic_path)+100];
-    char image_frame_name[strlen(nvinfer->alignment_pic_path)+100];
-    char image_origin_name[strlen(nvinfer->alignment_pic_path)+100];
-    int obj_id = 0;
-    if (nvinfer->alignment_type == 1) {
-      obj_id = object_meta->object_id;
-    } else if (nvinfer->alignment_type == 2) {
-      obj_id = object_meta->parent->object_id;
-    }
-    // std::cout<<nvinfer->alignment_pic_path<<std::endl;
-    sprintf(image_frame_name, "%s/frame-%d:object-%d:1-frame.png", nvinfer->alignment_pic_path, frame_meta->frame_num, obj_id); 
-    sprintf(image_aligned_name, "%s/frame-%d:object-%d:3-aligned.png", nvinfer->alignment_pic_path, frame_meta->frame_num, obj_id);  
-    sprintf(image_origin_name, "%s/frame-%d:object-%d:2-origin.png", nvinfer->alignment_pic_path, frame_meta->frame_num, obj_id); 
-    cv::imwrite(image_aligned_name, aligned); 
-    cv::imwrite(image_origin_name, cropped); 
-    cv::imwrite(image_frame_name, whole_frame); 
-  }
-
-  LockGMutex locker (nvinfer->process_lock);
-  /* Push the batch info structure in the processing queue and notify the output
-   * thread that a new batch has been queued. */
-  g_queue_push_tail (nvinfer->input_queue, batch);
-  g_cond_broadcast (&nvinfer->process_cond);
-  return TRUE;
-}
-
 /* Process entire frames in the batched buffer. */
 static GstFlowReturn
 gst_nvinfer_process_full_frame (GstNvInfer * nvinfer, GstBuffer * inbuf,
@@ -1950,16 +1668,6 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
       guint idx;
       std::shared_ptr<GstNvInferObjectHistory> obj_history;
       gulong frame_num = frame_meta->frame_num;
-      /* Custom alignment*/
-      bool valid_landmarks = false;
-      bool is_exists = false;
-      bool lmk_flag = false;
-      // ! 
-      // float face[5][2]={0};
-      float lmks[5][2];
-      unsigned int numCount=0;
-      float landmarks[10] = {0.0};
-      
 
       /* Cannot infer on untracked objects in asynchronous mode. */
       if (nvinfer->classifier_async_mode && object_meta->object_id == UNTRACKED_OBJECT_ID) {
@@ -2044,34 +1752,6 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
         continue;
       }
 
-      /* Custom Alignment*/
-      if (nvinfer->alignment_type){
-        NvDsMetaList * l_user_meta = NULL;
-        NvDsUserMeta *user_meta = NULL;
-        gint *user_meta_data = NULL;
-        for (l_user_meta = object_meta->obj_user_meta_list; l_user_meta != NULL; l_user_meta = l_user_meta->next) {
-          user_meta = (NvDsUserMeta *) (l_user_meta->data);
-          user_meta_data = (gint *)user_meta->user_meta_data;
-          lmk_flag = true;
-          if(user_meta->base_meta.meta_type == NVDS_USER_OBJECT_META_EXAMPLE){
-            // std::cout<<"in get usermeta"<<std::endl;
-            for (unsigned int i=0; i < 10; i++) {
-              // std::cout<<user_meta_data[i]<<" ";
-              if (user_meta_data[i]) {
-                landmarks[i] = (float)user_meta_data[i];
-                // std::cout<<landmarks[i]<<" ";
-              }
-            }
-            // std::cout<<std::endl;                      
-          }
-        }
-      }
-
-      // valid_landmarks = nvinfer->aligner.validLmks(landmarks, numCount);
-      // if (!valid_landmarks){
-      //     continue;
-      // }
-
       /* Object has a valid tracking id but does not have any history. Create
        * an entry in the map for the object. */
       if (source_info != nullptr && object_meta->object_id != UNTRACKED_OBJECT_ID &&
@@ -2143,17 +1823,8 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
           frame_meta->batch_id);
       batch->frames.push_back (frame);
 
-      /* Custom Alignment*/
-      if (batch->frames.size () == nvinfer->max_batch_size && nvinfer->alignment_type && lmk_flag) {
-        if (!convert_batch_and_push_to_input_thread_alignment (nvinfer, batch.get(), memory, frame_meta, object_meta, &object_meta->rect_params, landmarks)) {
-          return GST_FLOW_ERROR;
-        }
-        batch.release ();
-        conv_gst_buf = nullptr;
-        nvinfer->tmp_surf.numFilled = 0;
-      }
       /* Submit batch if the batch size has reached max_batch_size. */
-      else if (batch->frames.size () == nvinfer->max_batch_size) {
+      if (batch->frames.size () == nvinfer->max_batch_size) {
       if (!convert_batch_and_push_to_input_thread (nvinfer, batch.get(), memory)) {
         return GST_FLOW_ERROR;
       }
@@ -2328,7 +1999,7 @@ gst_nvinfer_process_tensor_input (GstNvInfer * nvinfer, GstBuffer * inbuf,
       input_batch.returnInputFunc = nullptr;
 
       for (auto &tensor : tensors)
-        tensor.inferDims.d[0] = batch->frames.size();
+        tensor.dims.d[0] = batch->frames.size();
 
       NvDsInferStatus status =
           DS_NVINFER_IMPL (nvinfer)->m_InferCtx->
@@ -2781,4 +2452,3 @@ nvinfer_plugin_init (GstPlugin * plugin)
 
 GST_PLUGIN_DEFINE (GST_VERSION_MAJOR, GST_VERSION_MINOR, nvdsgst_infer,
     DESCRIPTION, nvinfer_plugin_init, "6.1", LICENSE, BINARY_PACKAGE, URL)
-

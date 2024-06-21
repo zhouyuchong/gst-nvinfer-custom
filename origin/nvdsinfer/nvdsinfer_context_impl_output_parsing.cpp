@@ -10,9 +10,6 @@
  */
 
 #include <cassert>
-#include <iostream>
-#include <sstream>
-#include <string>
 
 #include "nvdsinfer_context_impl.h"
 
@@ -508,7 +505,6 @@ DetectPostprocessor::fillUnclusteredOutput(NvDsInferDetectionOutput& output)
         for(const auto& obj: perClassList)
         {
             NvDsInferObject &object = output.objects[output.numObjects];
-            
             object.left = obj.left;
             object.top = obj.top;
             object.width = obj.width;
@@ -516,30 +512,9 @@ DetectPostprocessor::fillUnclusteredOutput(NvDsInferDetectionOutput& output)
             object.classIndex = obj.classId;
             object.label = nullptr;
             object.mask = nullptr;
+            if(obj.classId < m_Labels.size() && m_Labels[obj.classId].size() > 0)
+                object.label = strdup(m_Labels[obj.classId][0].c_str());
             object.confidence = obj.detectionConfidence;
-            if(obj.classId < m_Labels.size() && m_Labels[obj.classId].size() > 0){
-                if (obj.numLmks) {
-                    std::string label_str = m_Labels[obj.classId][0];
-                    std::stringstream ss;
-                    ss<<label_str<<",";
-                    for (unsigned int i = 0; i < obj.numLmks; ++i) {
-                        if (i > 0) {
-                            ss << ",";
-                        }
-                        ss << obj.landmark[i];
-                    }
-                    std::string final_str = ss.str();
-                    if (object.label != nullptr) {
-                        free(object.label);
-                    }
-                    object.label = strdup(final_str.c_str());
-                    // std::cout<<object.label<<std::endl;
-                } else {
-                    object.label = strdup(m_Labels[obj.classId][0].c_str());
-                }
-                
-
-            }
 
             ++output.numObjects;
         }
@@ -762,7 +737,7 @@ DetectPostprocessor::fillDetectionOutput(
         }
     }
 
-    // preClusteringThreshold(m_DetectionParams, m_ObjectList);
+    preClusteringThreshold(m_DetectionParams, m_ObjectList);
 
     /* The above functions will add all objects in the m_ObjectList vector.
      * Need to seperate them per class for grouping. */
@@ -778,6 +753,7 @@ DetectPostprocessor::fillDetectionOutput(
             m_PerClassObjectList[object.classId].emplace_back(object);
         }
     }
+
     switch (m_ClusterMode)
     {
         case NVDSINFER_CLUSTER_NMS:

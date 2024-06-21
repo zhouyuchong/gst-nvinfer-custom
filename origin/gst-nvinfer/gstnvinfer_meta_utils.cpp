@@ -11,10 +11,7 @@
 
 #include <cmath>
 #include <cstring>
-#include <sstream>
-#include <vector>
-#include <string>
-#include "gstnvinfer_meta_utils.h" 
+#include "gstnvinfer_meta_utils.h"
 
 static inline int
 get_element_size (NvDsInferDataType data_type)
@@ -31,61 +28,6 @@ get_element_size (NvDsInferDataType data_type)
     default:
       return 0;
   }
-}
-
-/* copy function set by user. "data" holds a pointer to NvDsUserMeta*/
-static gpointer copy_user_meta(gpointer data, gpointer user_data)
-{
-  NvDsUserMeta *user_meta = (NvDsUserMeta *)data;
-  gint *src_user_metadata = (gint*)user_meta->user_meta_data;
-  gint *dst_user_metadata = (gint*)g_malloc0(10 * sizeof(gint));
-  memcpy(dst_user_metadata, src_user_metadata, 10 * sizeof(gint));
-  return (gpointer)dst_user_metadata;
-}
-
-/* release function set by user. "data" holds a pointer to NvDsUserMeta*/
-static void release_user_meta(gpointer data, gpointer user_data)
-{
-  NvDsUserMeta *user_meta = (NvDsUserMeta *) data;
-  if(user_meta->user_meta_data) {
-    g_free(user_meta->user_meta_data);
-    user_meta->user_meta_data = NULL;
-  }
-}
-
-void *set_metadata_ptr(const std::vector<std::string>& tokens, GstNvInfer * nvinfer, NvDsObjectMeta *parent_obj_meta, GstNvInferFrame & frame){
-  gint *user_metadata = (gint*)g_malloc0(10 * sizeof(gint));
-  std::string t1,t2;
-  for (unsigned int i = 0; i < tokens.size() - 1; ) {
-    if (i + 1 < tokens.size() && i + 2 < tokens.size()) {
-      try {
-        t1 = tokens[i + 1];
-        t2 = tokens[i + 2];
-        user_metadata[i] = int((std::stoi(tokens[i + 1]) - frame.offset_left) / frame.scale_ratio_x + frame.roi_left);
-        user_metadata[i + 1] = int((std::stoi(tokens[i + 2]) - frame.offset_top) / frame.scale_ratio_y + frame.roi_top);
-
-        if (!nvinfer->process_full_frame) {
-          user_metadata[i] += parent_obj_meta->rect_params.left;
-          user_metadata[i + 1] += parent_obj_meta->rect_params.top;
-        }
-      } catch (const std::out_of_range& e) {
-        // 处理转换错误
-        std::cout<<t1<<" "<<t2<<std::endl;
-        std::cerr << "Out of range error: " << e.what() << std::endl;
-        // 可能需要退出循环或进行其他错误处理
-      } catch (const std::invalid_argument& e) {
-        // 处理无效参数错误
-        std::cerr << "Invalid argument error: " << e.what() << std::endl;
-        // 可能需要退出循环或进行其他错误处理
-      }
-      i += 2;
-    } else {
-      // 处理 tokens 容器大小不足的情况
-      std::cerr << "Not enough tokens in the vector." << std::endl;
-      break; // 或者其他适当的错误处理
-    }
-  }
-  return (void *)user_metadata;
 }
 
 /**
@@ -180,43 +122,10 @@ attach_metadata_detector (GstNvInfer * nvinfer, GstMiniObject * tensor_out_objec
       rect_params.border_color = color_params.border_color;
     }
 
-    if (obj.label && !nvinfer->enable_output_landmark){
+    if (obj.label)
       g_strlcpy (obj_meta->obj_label, obj.label, MAX_LABEL_SIZE);
-      /* display_text requires heap allocated memory. */
-      text_params.display_text = g_strdup (obj.label);
-    } else if (obj.label && nvinfer->enable_output_landmark) {
-      std::vector<std::string> tokens;
-      std::stringstream ss(obj.label);
-      std::string token;
-      // 使用逗号解析字符串，第0个是label，后面的是landmark坐标
-      while (std::getline(ss, token, ',')) {
-          token.erase(std::remove_if(token.begin(), token.end(), isspace), token.end());
-          tokens.push_back(token);
-      }
-      g_strlcpy (obj_meta->obj_label, tokens[0].c_str(), MAX_LABEL_SIZE);
-      text_params.display_text = g_strdup (tokens[0].c_str());
-
-      NvDsUserMeta *user_meta = NULL;
-      NvDsMetaType user_meta_type = NVDS_USER_OBJECT_META_EXAMPLE;
-
-      NvDsBatchMeta *obj_batch_meta = obj_meta->base_meta.batch_meta;
-
-      /* Acquire NvDsUserMeta user meta from pool */
-      user_meta = nvds_acquire_user_meta_from_pool(obj_batch_meta);
-      // std::cout<<"in attach detector"<<std::endl;
-      // std::cout<<rect_params.left<<" "<<rect_params.top<<" "<<rect_params.width<<" "<<rect_params.height<<std::endl;
-
-      /* Set NvDsUserMeta below */
-      user_meta->user_meta_data = (void *)set_metadata_ptr(tokens, nvinfer, parent_obj_meta, frame);
-      user_meta->base_meta.meta_type = user_meta_type;
-      user_meta->base_meta.copy_func = (NvDsMetaCopyFunc)copy_user_meta;
-      user_meta->base_meta.release_func = (NvDsMetaReleaseFunc)release_user_meta;
-
-      /* We want to add NvDsUserMeta to frame level */
-      nvds_add_user_meta_to_obj(obj_meta, user_meta);
-
-    }
-
+    /* display_text requires heap allocated memory. */
+    text_params.display_text = g_strdup (obj.label);
     /* Display text above the left top corner of the object. */
     text_params.x_offset = rect_params.left;
     text_params.y_offset = rect_params.top - 10;
