@@ -13,6 +13,11 @@ ifeq ($(CUDA_VER),)
   $(error "CUDA_VER is not set")
 endif
 
+NVDS_VERSION?=
+ifeq ($(NVDS_VERSION),)
+  $(error "NVDS_VERSION is not set")
+endif
+
 CXX:= g++
 SRCS:= gstnvinfer.cpp  gstnvinfer_allocator.cpp gstnvinfer_property_parser.cpp \
        gstnvinfer_meta_utils.cpp gstnvinfer_impl.cpp gstnvinfer_yaml_parser.cpp \
@@ -20,13 +25,12 @@ SRCS:= gstnvinfer.cpp  gstnvinfer_allocator.cpp gstnvinfer_property_parser.cpp \
 INCS:= $(wildcard *.h)
 LIB:=libnvdsgst_infer.so
 
-NVDS_VERSION:=6.1
 
-CFLAGS+= -fPIC -std=c++11 -DDS_VERSION=\"6.1.0\" \
+CFLAGS+= -fPIC -std=c++11 -DDS_VERSION=\"$(NVDS_VERSION)\" \
 	 -I /usr/local/cuda-$(CUDA_VER)/include \
-	 -I /opt/nvidia/deepstream/deepstream-6.1/sources/includes \
-	 -I /opt/nvidia/deepstream/deepstream-6.1/sources/gst-plugins/gst-nvdspreprocess/include \
-	 -I /opt/nvidia/deepstream/deepstream-6.1/sources/libs/nvdsinfer -DNDEBUG
+	 -I /opt/nvidia/deepstream/deepstream-$(NVDS_VERSION)/sources/includes \
+	 -I /opt/nvidia/deepstream/deepstream-$(NVDS_VERSION)/sources/gst-plugins/gst-nvdspreprocess/include \
+	 -I /opt/nvidia/deepstream/deepstream-$(NVDS_VERSION)/sources/libs/nvdsinfer -DNDEBUG
 
 GST_INSTALL_DIR?=/opt/nvidia/deepstream/deepstream-$(NVDS_VERSION)/lib/gst-plugins/
 LIB_INSTALL_DIR?=/opt/nvidia/deepstream/deepstream-$(NVDS_VERSION)/lib/

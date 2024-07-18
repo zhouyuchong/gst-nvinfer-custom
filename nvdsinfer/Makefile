@@ -13,6 +13,11 @@ ifeq ($(CUDA_VER),)
   $(error "CUDA_VER is not set")
 endif
 
+NVDS_VERSION?=
+ifeq ($(NVDS_VERSION),)
+  $(error "NVDS_VERSION is not set")
+endif
+
 WITH_OPENCV?=0
 
 NVCC:=/usr/local/cuda-$(CUDA_VER)/bin/nvcc
@@ -25,7 +30,6 @@ SRCS:= nvdsinfer_context_impl.cpp  nvdsinfer_context_impl_capi.cpp \
 INCS:= $(wildcard *.h)
 LIB:=libnvds_infer.so
 
-NVDS_VERSION:=6.1
 
 LIB_INSTALL_DIR?=/opt/nvidia/deepstream/deepstream-$(NVDS_VERSION)/lib/
 
