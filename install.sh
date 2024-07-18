@@ -3,7 +3,7 @@
  # @Date: 2024-05-21 16:47:58
  # @Description: 
  # @LastEditors: zhouyuchong
- # @LastEditTime: 2024-05-23 15:37:00
+ # @LastEditTime: 2024-07-18 16:43:08
 ### 
 
 log() {
@@ -53,6 +53,11 @@ cuda_version=$(nvcc --version | grep -oP 'V\K\d+\.\d+')
 log "[INFO]CUDA Version: $cuda_version"
 
 export CUDA_VER=$cuda_version
+
+local DEEPSTREAM_VERSION
+log "[INPUT]Please input deepstream version(e.g. 6.0):"
+read DEEPSTREAM_VERSION
+export NVDS_VERSION=$DEEPSTREAM_VERSION
 
 log '[INFO]Installing dependencies'
 cp ./nvdsinfer.h /opt/nvidia/deepstream/deepstream/sources/includes/nvdsinfer.h
