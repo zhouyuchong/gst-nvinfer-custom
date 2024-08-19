@@ -3,7 +3,7 @@
  # @Date: 2024-05-21 16:47:58
  # @Description: 
  # @LastEditors: zhouyuchong
- # @LastEditTime: 2024-07-18 16:43:08
+ # @LastEditTime: 2024-08-19 14:23:19
 ### 
 
 log() {
@@ -55,7 +55,7 @@ log "[INFO]CUDA Version: $cuda_version"
 export CUDA_VER=$cuda_version
 
 local DEEPSTREAM_VERSION
-log "[INPUT]Please input deepstream version(e.g. 6.0):"
+echo -n "Please input deepstream version(e.g. 6.0):
 read DEEPSTREAM_VERSION
 export NVDS_VERSION=$DEEPSTREAM_VERSION
 
@@ -74,6 +74,3 @@ make -j$(nproc)
 make install
 
 log "[SUCCESS]install success"
-
-
-

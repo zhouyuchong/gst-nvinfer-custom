@@ -1520,11 +1520,12 @@ get_images(GstNvInfer *nvinfer, NvDsObjectMeta *object_meta, float pic_width, fl
     // std::cout<<int(object_meta->parent->rect_params.left)<<" "<<int(object_meta->parent->rect_params.top)<<" "<<int(object_meta->parent->rect_params.width)<<" "<<int(object_meta->parent->rect_params.height)<<std::endl;
     // std::cout<<int(object_meta->rect_params.left)<<" "<<int(object_meta->rect_params.top)<<" "<<int(object_meta->rect_params.width)<<" "<<int(object_meta->rect_params.height)<<std::endl;
     // cv::rectangle(whole_frame,cvPoint(int(object_meta->rect_params.left),int(object_meta->rect_params.top)),cvPoint(int(object_meta->rect_params.left + object_meta->rect_params.width),int(object_meta->rect_params.top + object_meta->rect_params.height)),cv::Scalar(255,0,0),1,1,0);
-    // for(int i=0;i<4;i++){
+    // for(int i=0;i<5;i++){
     //   cv::Point centerCircle1(matrix[i][0], matrix[i][1]);
-    //   std::cout<<matrix[i][0]<<" "<<matrix[i][1]<<std::endl;
+    //   // std::cout<<matrix[i][0]<<" "<<matrix[i][1]<<std::endl;
     //   int radiusCircle = 1;
-    //   cv::Scalar colorCircle1(0, 0, 255); // (B, G, R)
+    //   int g = i * 50;
+    //   cv::Scalar colorCircle1(0, g, 255); // (B, G, R)
     //   int thicknessCircle1 = 1;
     //   cv::circle(whole_frame, centerCircle1, radiusCircle, colorCircle1, thicknessCircle1);
     // }
@@ -1567,10 +1568,14 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M, int align_type, int id, cv:
     if (align_type == 1){
       cv::Mat transfer_mat = M(cv::Rect(0, 0, 3, 2));
       cv::warpAffine(whole_frame, frame, transfer_mat, cv::Size(112, 112), 1, 0, 0);
+      // cv::fastNlMeansDenoisingColored(frame, frame, 10, 10, 7, 21);
     } else if (align_type == 2){
       cv::warpPerspective(whole_frame, frame, M, cv::Size(94, 24), 1, 0, 0);
     } else if (align_type == 3){
       cv::warpPerspective(whole_frame, frame, M, cv::Size(168, 48), 1, 0, 0);
+    } else if (align_type == 4){
+      cv::Mat transfer_mat = M(cv::Rect(0, 0, 3, 2));
+      cv::warpAffine(whole_frame, frame, transfer_mat, cv::Size(112, 112), 1, 0, 0);
     }
 
     auto CheckPoint_alignment = std::chrono::system_clock::now();
@@ -2059,18 +2064,21 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
               // std::cout<<user_meta_data[i]<<" ";
               if (user_meta_data[i]) {
                 landmarks[i] = (float)user_meta_data[i];
-                // std::cout<<landmarks[i]<<" ";
+                std::cout<<landmarks[i]<<" ";
               }
             }
-            // std::cout<<std::endl;                      
+            std::cout<<std::endl;                      
           }
         }
       }
+      // for face we will score the face by its yaw and pitch
+      // if (nvinfer->alignment_type == 1) {
+      //   valid_landmarks = nvinfer->aligner.validLmks(landmarks);
+      //   if (!valid_landmarks){
+      //       continue;
+      //   } 
+      // } 
 
-      // valid_landmarks = nvinfer->aligner.validLmks(landmarks, numCount);
-      // if (!valid_landmarks){
-      //     continue;
-      // }
 
       /* Object has a valid tracking id but does not have any history. Create
        * an entry in the map for the object. */

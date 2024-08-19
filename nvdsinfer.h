@@ -157,7 +157,7 @@ typedef struct
   float detectionConfidence;
 
   unsigned int numLmks;
-  unsigned int landmark[10];
+  int landmark[10];
 } NvDsInferObjectDetectionInfo;
 
 /**

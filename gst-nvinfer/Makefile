@@ -61,3 +61,4 @@ install: $(LIB)
 
 clean:
 	rm -rf $(OBJS) $(LIB)
+

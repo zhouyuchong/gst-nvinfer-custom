@@ -9,6 +9,14 @@ float standard_face[5][2] = {
             {41.5493f, 92.3655f},
             {70.7299f, 92.2041f}
         };
+// FFHQ face with size 512x512
+float standard_face_ffhq[5][2] = {  
+            {192.98138, 239.94708},
+            {318.90277, 240.1936},
+            {256.63416, 314.01935},
+            {201.26117, 371.41043},
+            {313.08905, 371.15118}
+        };
 // standard car plate
 float standard_plate[4][2] = {
             {0.0f, 0.0f},
@@ -28,7 +36,7 @@ namespace alignnamespace {
 class Aligner::Impl {
 public:
 	cv::Mat Align(const cv::Mat& dst, int model_type);
-    bool validLmks(float *landmarks, int numCount);
+    bool validLmks(float *landmarks);
 
 
 private:
@@ -56,8 +64,8 @@ cv::Mat Aligner::Align(const cv::Mat & dst, int model_type) {
 	return impl_->Align(dst, model_type);
 }
 
-bool Aligner::validLmks(float *landmarks, int numCount) {
-    return impl_->validLmks(landmarks, numCount);
+bool Aligner::validLmks(float *landmarks) {
+    return impl_->validLmks(landmarks);
 }
 
 
@@ -81,31 +89,58 @@ cv::Mat Aligner::Impl::Align(const cv::Mat & dst, int model_type) {
         // std::cout<<(dst.checkVector(2, CV_32F) == 4)<<" "<<(src.checkVector(2, CV_32F) == 4)<<std::endl;
         cv::Mat M= cv::getPerspectiveTransform(dst, src);
         return M;
+    } else if (model_type == 4) {
+        cv::Mat src(5,2,CV_32FC1, standard_face_ffhq);
+        memcpy(src.data, standard_face_ffhq, 2 * 5 * sizeof(float));
+        cv::Mat M= SimilarTransform(dst, src);
+        return M;
     } else {
         std::cout << "model type error." << std::endl;
         return cv::Mat();
     }
 }
 
-bool Aligner::Impl::validLmks(float landmarks[10], int numCount) {
-    float lmks[numCount/2][2];
-    for (unsigned int i=0;i<numCount;i++) {
-        lmks[i/2][i%2] = landmarks[i];
-    }
+bool Aligner::Impl::validLmks(float landmarks[10]) {
+    cv::Point2f left_eye = cv::Point2f(landmarks[0], landmarks[1]);
+    cv::Point2f right_eye = cv::Point2f(landmarks[2], landmarks[3]);
+    cv::Point2f nose_tip = cv::Point2f(landmarks[4], landmarks[5]);
+    cv::Point2f mouth_left = cv::Point2f(landmarks[6], landmarks[7]);
+    cv::Point2f mouth_right = cv::Point2f(landmarks[8], landmarks[9]);
 
-    float width_up   = lmks[1][0] - lmks[0][0];
-    float width_down = lmks[4][0] - lmks[3][0];
-    float height_left  = lmks[3][1] - lmks[0][1];
-    float height_right = lmks[4][1] - lmks[1][1];
+    cv::Point2f eye_center = (left_eye + right_eye) / 2.0f;
 
-    if (lmks[2][0]<(lmks[0][0] + width_up / 5.f) || lmks[2][0]<(lmks[3][0] + width_down / 5.f) || 
-        lmks[2][0]>(lmks[1][0] - width_up / 5.f) || lmks[2][0]>(lmks[4][0] - width_down / 5.f)){
-    return false;
-    }
-    if (lmks[2][1]>(lmks[3][1] - height_left / 5.f) || lmks[2][1]>(lmks[4][1] - height_right / 5.f) || 
-        lmks[2][1]<(lmks[1][1] + height_left / 5.f) || lmks[2][1]<(lmks[0][1] + height_right / 5.f)){
-    return false;
-    }
+    cv::Point2f eye_to_nose = nose_tip - eye_center;
+    double yaw = atan2(eye_to_nose.y, eye_to_nose.x);
+    double yaw_degrees = yaw  / CV_PI;  // 将弧度转换为度
+
+    cv::Point2f mouth_center = (mouth_left + mouth_right) / 2.0f;
+    cv::Point2f nose_to_mouth = mouth_center - nose_tip;
+    double pitch = atan2(nose_to_mouth.y, nose_to_mouth.x);
+    double pitch_degrees = pitch  / CV_PI; 
+
+    std::cout<<"degrees: "<< yaw_degrees<<" "<<pitch_degrees<<std::endl;
+    double alpha = 10.0 / 3.0;
+    double beta = -7.0 / 3.0;
+    double final_score = 0.5 * (alpha * cos(yaw_degrees) + beta) + 0.5 * (alpha * cos(pitch_degrees) + beta);
+    std::cout<<"score: "<<final_score<<std::endl;
+    // float lmks[5][2];
+    // for (unsigned int i=0;i<10;i++) {
+    //     lmks[i/2][i%2] = landmarks[i];
+    // }
+
+    // float width_up   = lmks[1][0] - lmks[0][0];
+    // float width_down = lmks[4][0] - lmks[3][0];
+    // float height_left  = lmks[3][1] - lmks[0][1];
+    // float height_right = lmks[4][1] - lmks[1][1];
+
+    // if (lmks[2][0]<(lmks[0][0] + width_up / 5.f) || lmks[2][0]<(lmks[3][0] + width_down / 5.f) || 
+    //     lmks[2][0]>(lmks[1][0] - width_up / 5.f) || lmks[2][0]>(lmks[4][0] - width_down / 5.f)){
+    // return false;
+    // }
+    // if (lmks[2][1]>(lmks[3][1] - height_left / 5.f) || lmks[2][1]>(lmks[4][1] - height_right / 5.f) || 
+    //     lmks[2][1]<(lmks[1][1] + height_left / 5.f) || lmks[2][1]<(lmks[0][1] + height_right / 5.f)){
+    // return false;
+    // }
     return true;
 }
 

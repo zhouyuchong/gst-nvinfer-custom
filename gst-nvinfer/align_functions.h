@@ -3,7 +3,7 @@
  * @Date: 2024-02-26 14:51:58
  * @Description: 
  * @LastEditors: zhouyuchong
- * @LastEditTime: 2024-03-05 17:16:13
+ * @LastEditTime: 2024-08-16 11:38:39
  */
 #ifndef _DAMONZZZ_ALIGNER_H_
 #define _DAMONZZZ_ALIGNER_H_
@@ -18,7 +18,7 @@ public:
 	~Aligner();
 
 	cv::Mat Align(const cv::Mat & dst, int model_type);
-	bool validLmks(float landmarks[10], int numCount);
+	bool validLmks(float landmarks[10]);
 	
 private:
 	class Impl;
