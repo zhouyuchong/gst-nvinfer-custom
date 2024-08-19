@@ -2064,10 +2064,10 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
               // std::cout<<user_meta_data[i]<<" ";
               if (user_meta_data[i]) {
                 landmarks[i] = (float)user_meta_data[i];
-                std::cout<<landmarks[i]<<" ";
+                // std::cout<<landmarks[i]<<" ";
               }
             }
-            std::cout<<std::endl;                      
+            // std::cout<<std::endl;                      
           }
         }
       }
