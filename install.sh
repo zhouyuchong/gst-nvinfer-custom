@@ -3,7 +3,7 @@
  # @Date: 2024-05-21 16:47:58
  # @Description: 
  # @LastEditors: zhouyuchong
- # @LastEditTime: 2024-08-19 14:23:19
+ # @LastEditTime: 2024-08-20 14:13:59
 ### 
 
 log() {
@@ -54,8 +54,7 @@ log "[INFO]CUDA Version: $cuda_version"
 
 export CUDA_VER=$cuda_version
 
-local DEEPSTREAM_VERSION
-echo -n "Please input deepstream version(e.g. 6.0):
+echo -n "Please input deepstream version(e.g. 6.0):"
 read DEEPSTREAM_VERSION
 export NVDS_VERSION=$DEEPSTREAM_VERSION
 
