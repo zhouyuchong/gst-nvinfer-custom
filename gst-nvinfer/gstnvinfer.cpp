@@ -25,7 +25,6 @@
 #include "gst-nvevent.h"
 #include "gstnvdsmeta.h"
 #include "nvdspreprocess_meta.h"
-
 #include "gstnvinfer.h"
 #include "gstnvinfer_allocator.h"
 #include "gstnvinfer_meta_utils.h"
@@ -1493,11 +1492,11 @@ get_images(GstNvInfer *nvinfer, NvDsObjectMeta *object_meta, float pic_width, fl
     auto end = std::chrono::system_clock::now();
     size_t frame_step = surface->surfaceList[frameIndex].pitch;
 
-    // printf("colorformat =%d\n", surface->surfaceList[frameIndex].colorFormat);
     cv::Mat out_mat;
     int colorFormat = surface->surfaceList[frameIndex].colorFormat;
+    // printf("colorformat =%d\n", surface->surfaceList[frameIndex].colorFormat);
     // GST_DEBUG_OBJECT(nvinfer, "Origin frame color format:%d.", colorFormat);
-    if(colorFormat == 7 || colorFormat == 33){
+    if(colorFormat == 6 || colorFormat == 7 || colorFormat == 33){
       cv::Mat frame = cv::Mat(frame_height + frame_height/2, frame_width, CV_8UC1, src_data, frame_step);
       out_mat = cv::Mat(cv::Size(frame_width, frame_height), CV_8UC4);
       cv::cvtColor(frame, out_mat, CV_YUV2RGB_NV21);
@@ -1542,7 +1541,59 @@ get_images(GstNvInfer *nvinfer, NvDsObjectMeta *object_meta, float pic_width, fl
 }
 
 static cv::Mat
-align_preprocess(NvBufSurface * surface, cv::Mat &M, int align_type, int id, cv::Mat &whole_frame){
+align_preprocess(NvBufSurface * frame_surface, NvBufSurface * surface, cv::Mat &M, int align_type, int id, cv::Mat &whole_frame){
+  // time measurement
+
+  // double *start_time = NULL;
+  // start_time = new double;
+	// *start_time = 
+	// delete num;
+
+  // auto t1 = std::chrono::system_clock::now();
+  // auto t2 = std::chrono::system_clock::now();
+  // the color format isn't always RGB for original frame
+  // we will do color trans first then do alignment
+  
+  gint frame_width = (gint)frame_surface->surfaceList[0].width;
+  gint frame_height = (gint)frame_surface->surfaceList[0].height;
+  std::cout<<"color: "<<frame_surface->surfaceList[0].colorFormat<<" "<<NVBUF_COLOR_FORMAT_NV12 <<std::endl;
+  // " \ndatasize: "<<frame_surface->surfaceList[0].dataSize<<
+  // " \npitch"<<frame_surface->surfaceList[0].pitch<<
+  // "\nwidth"<<frame_surface->surfaceList[0].width<<
+  // "\nheight"<<frame_surface->surfaceList[0].height<<std::endl;
+
+  NppStatus stat;
+  void *rgb_frame_ptr = NULL;
+  size_t pitch;
+  size_t widthInBytes = frame_surface->surfaceList[0].pitch * 3; // RGB has 3 bytes per pixel, so width in bytes is 2048 * 3
+  size_t height = frame_height;
+  // we allocate mem on device since we process it on gpu
+  cudaMallocPitch(&rgb_frame_ptr, &pitch, widthInBytes, height);
+  // std::cout<<"get pitch: "<<pitch<<std::endl;
+
+  const Npp8u* y_plane;                // Pointer to the Y plane
+  const Npp8u* uv_plane;               // Pointer to the UV plane
+
+  y_plane = static_cast<const Npp8u*>(frame_surface->surfaceList[0].dataPtr);
+  uv_plane = y_plane + (frame_surface->surfaceList[0].pitch * frame_height);
+
+  const Npp8u* pSrc[2];
+  pSrc[0] = y_plane;  // Y plane pointer
+  pSrc[1] = uv_plane;
+  NppiSize oSizeROI_00;
+  oSizeROI_00.width  = frame_width;
+  oSizeROI_00.height = frame_height;
+
+  stat = nppiNV12ToRGB_8u_P2C3R(pSrc,
+                                frame_surface->surfaceList[0].pitch, 
+                                static_cast<Npp8u*>(rgb_frame_ptr), 
+                                pitch,
+                                oSizeROI_00);
+
+  std::cout<<"convert color result: "<<stat<<std::endl;
+  // cudaFreeHost(rgb_frame_ptr);
+
+
   for (uint frameIndex = 0; frameIndex < surface->numFilled; frameIndex++) {
     gint frame_width = (gint)surface->surfaceList[frameIndex].width;
     gint frame_height = (gint)surface->surfaceList[frameIndex].height;
@@ -1551,20 +1602,65 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M, int align_type, int id, cv:
     CHECK_CUDA_STATUS (cudaMallocHost (&src_data,
                                        surface->surfaceList[frameIndex].dataSize), "Could not allocate cuda host buffer");
 
+    void *src_data_2 = NULL;
+    CHECK_CUDA_STATUS (cudaMallocHost (&src_data_2,
+                                       surface->surfaceList[frameIndex].dataSize), "Could not allocate cuda host buffer");
+
     if (src_data == NULL) {
       g_print("Error: failed to malloc src_data \n");
     }
+
+    // get matrix
+    cv::Mat transfer_mat = M(cv::Rect(0, 0, 3, 2));
+    int cols = transfer_mat.cols, rows = transfer_mat.rows;
+    double aCoeffs[2][3];
+    for(int i = 0; i < rows; i++){
+        const float* Mi = transfer_mat.ptr<float>(i);
+        for(int j = 0; j < cols; j++){
+          aCoeffs[i][j] = Mi[j];
+        }   
+    }
+    std::cout<<transfer_mat<<std::endl;
+
+    // copy image from device to host
+    // cudaMemcpy((void *)src_data,
+    //     (void *)surface->surfaceList[frameIndex].dataPtr,
+    //     surface->surfaceList[frameIndex].dataSize,
+    //     cudaMemcpyDeviceToHost);
+
+    // get warpaffine src_data to src_data_2
+    NppiRect oSrcROI_00 = {0, 0, 1920, 1080};
+    NppiRect oSrcROI = {0, 0, frame_width, frame_height};
+    NppiSize oSizeROI;
+    oSizeROI.width  = frame_width;
+    oSizeROI.height = frame_height;
+    NppStatus stat;
     auto start = std::chrono::system_clock::now();
-    cudaMemcpy((void *)src_data,
-        (void *)surface->surfaceList[frameIndex].dataPtr,
-        surface->surfaceList[frameIndex].dataSize,
-        cudaMemcpyDeviceToHost);
-    auto CheckPoint_d2h = std::chrono::system_clock::now();
+    stat = nppiWarpAffine_8u_C3R(static_cast<const Npp8u*>(rgb_frame_ptr), 
+                              oSizeROI_00,
+                              pitch,
+                              oSrcROI_00, 
+                              static_cast<Npp8u*>(src_data_2), 
+                              surface->surfaceList[frameIndex].pitch,
+                              oSrcROI, aCoeffs, 1);
+
+    // auto CheckPoint_d2h = std::chrono::system_clock::now();
+    // auto duration = CheckPoint_d2h - start;
+    // double duration_seconds = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
+    // std::cout<<"stats: "<<stat<<" delay: "<<duration_seconds<<std::endl;
+
+    // auto start_2 = std::chrono::system_clock::now();
+
+    // auto end_2 = std::chrono::system_clock::now();
+    // auto duration_2 = end_2 - start_2;
+    // double duration_seconds_2 = std::chrono::duration_cast<std::chrono::microseconds>(duration_2).count();
+    // std::cout<<"time usage to transport: "<<duration_seconds_2<<std::endl;
 
     size_t frame_step = surface->surfaceList[frameIndex].pitch;
-
-    cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC3, src_data, frame_step);
+    cv::Mat frame = cv::Mat(frame_height, frame_width, CV_8UC3, src_data_2, frame_step);
     
+    auto start1 = std::chrono::system_clock::now();
+    align_type = -1;
     if (align_type == 1){
       cv::Mat transfer_mat = M(cv::Rect(0, 0, 3, 2));
       cv::warpAffine(whole_frame, frame, transfer_mat, cv::Size(112, 112), 1, 0, 0);
@@ -1584,8 +1680,15 @@ align_preprocess(NvBufSurface * surface, cv::Mat &M, int align_type, int id, cv:
         frame.ptr(0),
         sizeInBytes,
         cudaMemcpyHostToDevice);  
-    auto CheckPoint_h2d = std::chrono::system_clock::now();
+
+    auto end1 = std::chrono::system_clock::now();
+    auto duration1 = end1 - start1;
+    double duration_seconds1 = std::chrono::duration_cast<std::chrono::microseconds>(duration1).count();
+    std::cout<<"delay: "<<duration_seconds1<<std::endl;
+    // auto CheckPoint_h2d = std::chrono::system_clock::now();
     cudaFreeHost(src_data);
+    cudaFreeHost(src_data_2);
+    cudaFreeHost(rgb_frame_ptr);
     return frame;
   }
 }
@@ -1638,6 +1741,7 @@ convert_batch_and_push_to_input_thread_alignment (GstNvInfer *nvinfer,
   cv::Mat dst(row ,2, CV_32FC1, lmks);
   memcpy(dst.data, lmks, 2 * row * sizeof(float));
   cv::Mat M = nvinfer->aligner.Align(dst, nvinfer->alignment_type);
+
   // std::cout<<"token 3 ";
 
   std::tie(cropped, whole_frame) = get_images(nvinfer, object_meta, pic_width, pic_height, lmks);
@@ -1658,7 +1762,7 @@ convert_batch_and_push_to_input_thread_alignment (GstNvInfer *nvinfer,
 
   cv::Mat aligned;
   cv::Mat resizedMat;
-  aligned = align_preprocess(mem->surf, M, nvinfer->alignment_type, object_meta->object_id, whole_frame);
+  aligned = align_preprocess(&nvinfer->tmp_surf, mem->surf, M, nvinfer->alignment_type, object_meta->object_id, whole_frame);
   // std::cout<<"token 4"<<std::endl;
   if (strlen(nvinfer->alignment_pic_path)) {
     char image_aligned_name[strlen(nvinfer->alignment_pic_path)+100];
