@@ -26,6 +26,9 @@
 #include "nvbufsurftransform.h"
 #include <nvdsinfer_context.h>
 
+#include "nppi.h"
+#include "nppi_geometry_transforms.h"
+
 #include "gstnvdsinfer.h"
 
 #include "gstnvdsmeta.h"
