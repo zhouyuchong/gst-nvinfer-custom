@@ -61,6 +61,8 @@ typedef struct _GstNvInferImpl GstNvInferImpl;
 #define GST_IS_NVINFER_CLASS(klass) (G_TYPE_CHECK_CLASS_TYPE((klass),GST_TYPE_NVINFER))
 #define GST_NVINFER_CAST(obj)  ((GstNvInfer *)(obj))
 
+#define NUM_LMKS 10
+
 /**
  * Enum for all GObject properties for the element.
  */
@@ -342,6 +344,13 @@ struct _GstNvInfer
   gchar * alignment_pic_path;
   alignnamespace::Aligner aligner;
 };
+
+typedef struct LandmarkInfo
+{
+  float landmarks[10];
+  int track_id;
+  int frame_id;
+}LandmarkInfo;
 
 /* GStreamer boilerplate. */
 struct _GstNvInferClass {
