@@ -3,7 +3,7 @@
  * @Date: 2024-02-26 14:51:58
  * @Description: 
  * @LastEditors: zhouyuchong
- * @LastEditTime: 2024-09-19 11:29:27
+ * @LastEditTime: 2024-09-19 17:37:19
 -->
 # Custom gst-nvinfer (DEMO)
 This is a custom gst-nvinfer plugin to do some preprocess and postprocess.
@@ -63,7 +63,8 @@ sh restore.sh
 ```
 
 ## TODO
-+ cal affine matrix use npp
++ ~~cal affine matrix use cuSolver(not efficient as expected)~~
++ cal affine matrix use eigen
 + add more test case
 
 ## Reference
