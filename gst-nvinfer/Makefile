@@ -40,7 +40,8 @@ LIBS := -shared -Wl,-no-undefined \
 
 LIBS+= -L$(LIB_INSTALL_DIR) -lnvdsgst_helper -lnvdsgst_meta -lnvds_meta \
        -lnvds_infer -lnvbufsurface -lnvbufsurftransform -ldl -lpthread -lyaml-cpp \
-       -lcuda -Wl,-rpath,$(LIB_INSTALL_DIR)
+       -lcuda -Wl,-rpath,$(LIB_INSTALL_DIR) \
+	   -lnppc  -lnppig -lnppicc -lnppial -lnppidei
 
 OBJS:= $(SRCS:.cpp=.o)
 
