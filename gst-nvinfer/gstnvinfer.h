@@ -347,8 +347,8 @@ struct _GstNvInfer
 
 typedef struct LandmarkInfo
 {
-  float landmarks[10];
-  int track_id;
+  float bbox[4];
+  int should_split;
   int frame_id;
 }LandmarkInfo;
 
