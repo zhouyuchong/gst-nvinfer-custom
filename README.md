@@ -3,7 +3,7 @@
  * @Date: 2024-02-26 14:51:58
  * @Description: 
  * @LastEditors: zhouyuchong
- * @LastEditTime: 2024-09-19 17:37:19
+ * @LastEditTime: 2024-10-18 17:26:27
 -->
 # Custom gst-nvinfer (DEMO)
 This is a custom gst-nvinfer plugin to do some preprocess and postprocess.
@@ -16,6 +16,8 @@ This is a custom gst-nvinfer plugin to do some preprocess and postprocess.
 + add landmarks and number of lmks in `object_user_metadata`
 + use npp to do alignment
 + support multi batch size now
++ support double-line car plate recognition(without alignment), check at branch 'car_plt_split'
+
 
 ## How it works
 ### Detector
