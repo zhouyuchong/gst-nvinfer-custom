@@ -1489,28 +1489,24 @@ align_preprocess(GstNvInfer *nvinfer, NvBufSurface * frame_surface, NvBufSurface
   void *host_aligned_ptr = NULL;
   void *host_origin_ptr = NULL;
   
-  size_t pitch;
-  size_t widthInBytes;
-  size_t height = frame_surface->surfaceList[0].height;
+
   gint frame_width = (gint)frame_surface->surfaceList[0].width;
   gint frame_height = (gint)frame_surface->surfaceList[0].height;
+  size_t frame_pitch = frame_width * 3; // RGB 3 channel format
+  const int aDstOrder[3] = {0, 1, 2};
+
+
   size_t cropped_datasize  = surface->surfaceList[0].dataSize;
   int frame_color_format   = frame_surface->surfaceList[0].colorFormat;
   int cropped_color_format = surface->surfaceList[0].colorFormat;
-  NppStatus stat;
+  NppStatus npp_stat;
   NppiSize oSizeROI_frame;
   oSizeROI_frame.width  = frame_width;
   oSizeROI_frame.height = frame_height;
 
-  if (frame_color_format < 29 && frame_color_format > 19) {
-    widthInBytes = frame_surface->surfaceList[0].pitch;
-  } else {
-    // RGB has 3 bytes per pixel, so width in bytes should be multiple by 3
-    widthInBytes = frame_surface->surfaceList[0].pitch * 3;
-  }
-
+  // printf("color format: %d, %d\n", frame_color_format, cropped_color_format);
   // allocate memory on device and host
-  CHECK_CUDA_STATUS(cudaMallocPitch(&rgb_frame_ptr, &pitch, widthInBytes, height), "Failed to allocate memory on device");
+  CHECK_CUDA_STATUS(cudaMalloc(&rgb_frame_ptr, frame_pitch * frame_height), "Failed to allocate memory on device");
   CHECK_CUDA_STATUS(cudaMalloc(&device_aligned_ptr, surface->surfaceList[0].dataSize), "Could not allocate cuda buffer");
   if (strlen(nvinfer->alignment_pic_path)) {
     cudaMallocHost(&host_aligned_ptr, surface->surfaceList[0].dataSize);
@@ -1518,20 +1514,33 @@ align_preprocess(GstNvInfer *nvinfer, NvBufSurface * frame_surface, NvBufSurface
   }
 
   for (uint frameIndex = 0; frameIndex < frame_surface->numFilled; frameIndex++) {
+
     // check every cropped object to avoid memory leak
     if (surface->surfaceList[frameIndex].dataSize != cropped_datasize) {
       GST_ERROR_OBJECT(nvinfer, "Fail to do alignment: frame size mismatch");
       break;
     }
 
-    if (frame_color_format < 29 && frame_color_format > 19) {
-      // frame already in RGB format, simply copy
-      cudaMemcpy((void *)frame_surface->surfaceList[frameIndex].dataPtr,
-                (void *)rgb_frame_ptr,
-                frame_surface->surfaceList[frameIndex].dataSize,
-                cudaMemcpyDeviceToDevice);  
+    if (frame_color_format == NVBUF_COLOR_FORMAT_RGB || frame_color_format == NVBUF_COLOR_FORMAT_BGR) {
+      /*simply copy, not use cudaMemcpy
+      because we want to make sure that all data (no matter colorformat)
+      will have the same pitch at last
+      */
+      npp_stat = nppiSwapChannels_8u_C3R( static_cast<Npp8u*>(frame_surface->surfaceList[frameIndex].dataPtr), 
+                                          frame_surface->surfaceList[frameIndex].pitch,
+                                          static_cast<Npp8u*>(rgb_frame_ptr),
+                                          frame_pitch,
+                                          NppiSize {frame_width, frame_height},
+                                          aDstOrder);
+    } else if (frame_color_format > 18 && frame_color_format < 27) {
+      // remove alpha channel
+      npp_stat = nppiSwapChannels_8u_C4C3R(static_cast<Npp8u*>(frame_surface->surfaceList[frameIndex].dataPtr), 
+                                          frame_surface->surfaceList[frameIndex].pitch,
+                                          static_cast<Npp8u*>(rgb_frame_ptr),
+                                          frame_pitch,
+                                          NppiSize {frame_width, frame_height},
+                                          aDstOrder);
     } else {
-
       const Npp8u* y_plane;                // Pointer to the Y plane
       const Npp8u* uv_plane;               // Pointer to the UV plane
 
@@ -1540,42 +1549,34 @@ align_preprocess(GstNvInfer *nvinfer, NvBufSurface * frame_surface, NvBufSurface
       const Npp8u* pSrc[2];
       pSrc[0] = y_plane;  // Y plane pointer
       pSrc[1] = uv_plane;
-      
-      
-      start_time = std::chrono::system_clock::now();
-      if (cropped_color_format == NVBUF_COLOR_FORMAT_RGB) {
-        stat = nppiNV12ToRGB_8u_P2C3R(pSrc,
-                          frame_surface->surfaceList[0].pitch, 
-                          static_cast<Npp8u*>(rgb_frame_ptr), 
-                          pitch,
-                          oSizeROI_frame);
-      } else if (cropped_color_format == NVBUF_COLOR_FORMAT_BGR) {
-        stat = nppiNV12ToBGR_8u_P2C3R(pSrc,
-                          frame_surface->surfaceList[0].pitch, 
-                          static_cast<Npp8u*>(rgb_frame_ptr), 
-                          pitch,
-                          oSizeROI_frame);
-      }
-      end_time = std::chrono::system_clock::now();
-      duration = end_time - start_time;
-      duration_seconds = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
-      // on RTX 3060 its time usage is 13ms average
-      // printf("time usage of nppiNV12ToRGB_8u_P2C3R: %f\n", duration_seconds);
-      if (stat != NPP_SUCCESS) {
-        GST_WARNING_OBJECT(nvinfer, "Failed to convert NV12 to RGB, error code: %d", stat);
+      npp_stat = nppiNV12ToRGB_8u_P2C3R(pSrc,
+                        frame_surface->surfaceList[0].pitch, 
+                        static_cast<Npp8u*>(rgb_frame_ptr), 
+                        frame_pitch,
+                        NppiSize {frame_width, frame_height});
+    }
+    if (npp_stat != NPP_SUCCESS) {
+        GST_WARNING_OBJECT(nvinfer, "Failed to convert NV12 to RGB, error code: %d", npp_stat);
         break;
-      }
     }
 
     // get landmarks info
-    float lmks[NUM_LMKS/2][2];
+    float lmks[NUM_LMKS/2][2] = {0};
     LandmarkInfo lmkinfo = landmarkInfos.front();
     landmarkInfos.erase(landmarkInfos.begin());
 
     // get affine matrix
     // TODO let's get rid of opencv!
+    bool data_valid = true;
     for (unsigned int i=0;i<NUM_LMKS;i++) {
       lmks[i/2][i%2] = lmkinfo.landmarks[i];
+      if (lmks[i/2][i%2] <= 0){
+        data_valid = false;
+      }
+    }
+    if (!data_valid) {
+      GST_WARNING_OBJECT(nvinfer, "Get incorrect face landmarks contain non-positive value. Skip this frame.");
+      continue;
     }
     int row = sizeof(lmks) / sizeof(lmks[0]);
     cv::Mat dst(row ,2, CV_32FC1, lmks);
@@ -1601,21 +1602,34 @@ align_preprocess(GstNvInfer *nvinfer, NvBufSurface * frame_surface, NvBufSurface
     oSizeROI.height = cropped_frame_height;
 
     start_time = std::chrono::system_clock::now();
-    stat = nppiWarpAffine_8u_C3R(static_cast<const Npp8u*>(rgb_frame_ptr), 
+    npp_stat = nppiWarpAffine_8u_C3R(static_cast<const Npp8u*>(rgb_frame_ptr), 
                               oSizeROI_frame,
-                              pitch,
+                              frame_pitch,
                               oSrcROI_frame, 
                               static_cast<Npp8u*>(device_aligned_ptr), 
                               surface->surfaceList[frameIndex].pitch,
                               oSrcROI, aCoeffs, 1);
 
-    end_time = std::chrono::system_clock::now();
-    duration = end_time - start_time;
-    duration_seconds = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
+  //   end_time = std::chrono::system_clock::now();
+  //   duration = end_time - start_time;
+  //   duration_seconds = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
     // average time usage: 10ms on RTX 3060
     // printf("time usage of nppiWarpAffine_8u_C3R: %f\n", duration_seconds);
-    if (stat != NPP_SUCCESS) {
-      GST_WARNING_OBJECT(nvinfer, "Failed to warpAffine, error code: %d", stat);
+    if (npp_stat != NPP_SUCCESS) {
+      GST_WARNING_OBJECT(nvinfer, "Failed to warpAffine, error code: %d", npp_stat);
+      for(int i = 0; i < 2; i++){
+        for(int j = 0; j < 3; j++){
+          printf("%f ", aCoeffs[i][j]);
+        }
+        printf("\n");
+      }
+      std::cout<<M<<std::endl;
+      for (int i=0;i<5;i++) {
+        for(int j = 0; j < 2; j++){
+          printf("%f ", lmks[i][j]);
+        }
+        printf("\n");
+      }
       break;
     }
 
@@ -1642,7 +1656,6 @@ align_preprocess(GstNvInfer *nvinfer, NvBufSurface * frame_surface, NvBufSurface
                 surface->surfaceList[frameIndex].dataSize,
                 cudaMemcpyDeviceToHost);
 
-      // cv::Mat out_mat;    
       cv::Mat aligned_object = cv::Mat(cropped_frame_height, cropped_frame_width, CV_8UC3, host_aligned_ptr, surface->surfaceList[frameIndex].pitch);
       cv::Mat origin_object = cv::Mat(cropped_frame_height, cropped_frame_width, CV_8UC3, host_origin_ptr, surface->surfaceList[frameIndex].pitch);
       
