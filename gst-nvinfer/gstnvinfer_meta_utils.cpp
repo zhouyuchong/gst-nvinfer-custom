@@ -61,8 +61,8 @@ void *set_metadata_ptr(const std::vector<std::string>& tokens, GstNvInfer * nvin
       try {
         t1 = tokens[i + 1];
         t2 = tokens[i + 2];
-        user_metadata[i] = int((std::stoi(tokens[i + 1]) - frame.offset_left) / frame.scale_ratio_x + frame.roi_left);
-        user_metadata[i + 1] = int((std::stoi(tokens[i + 2]) - frame.offset_top) / frame.scale_ratio_y + frame.roi_top);
+        user_metadata[i] = std::max(int((std::stoi(tokens[i + 1]) - frame.offset_left) / frame.scale_ratio_x + frame.roi_left), 0);
+        user_metadata[i + 1] = std::max(int((std::stoi(tokens[i + 2]) - frame.offset_top) / frame.scale_ratio_y + frame.roi_top), 0);
 
         if (!nvinfer->process_full_frame) {
           user_metadata[i] += parent_obj_meta->rect_params.left;

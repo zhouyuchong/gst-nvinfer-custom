@@ -1514,6 +1514,23 @@ align_preprocess(GstNvInfer *nvinfer, NvBufSurface * frame_surface, NvBufSurface
   }
 
   for (uint frameIndex = 0; frameIndex < frame_surface->numFilled; frameIndex++) {
+    // get landmarks info
+    float lmks[NUM_LMKS/2][2] = {0};
+    int data_valid = 1;
+    LandmarkInfo lmkinfo = landmarkInfos.front();
+    landmarkInfos.erase(landmarkInfos.begin());
+
+    // get affine matrix
+    // TODO let's get rid of opencv!
+    for (unsigned int i=0;i<NUM_LMKS;i++) {
+      lmks[i/2][i%2] = lmkinfo.landmarks[i];
+      if (lmks[i/2][i%2] <= 0 || lmks[i/2][i%2] >= 10000){
+        GST_WARNING_OBJECT(nvinfer, "Landmark info is invalid, skip alignment");
+        data_valid = 0;
+        break;
+      }
+    }
+    if (!data_valid) continue;
 
     // check every cropped object to avoid memory leak
     if (surface->surfaceList[frameIndex].dataSize != cropped_datasize) {
@@ -1559,25 +1576,7 @@ align_preprocess(GstNvInfer *nvinfer, NvBufSurface * frame_surface, NvBufSurface
         GST_WARNING_OBJECT(nvinfer, "Failed to convert NV12 to RGB, error code: %d", npp_stat);
         break;
     }
-
-    // get landmarks info
-    float lmks[NUM_LMKS/2][2] = {0};
-    LandmarkInfo lmkinfo = landmarkInfos.front();
-    landmarkInfos.erase(landmarkInfos.begin());
-
-    // get affine matrix
-    // TODO let's get rid of opencv!
-    bool data_valid = true;
-    for (unsigned int i=0;i<NUM_LMKS;i++) {
-      lmks[i/2][i%2] = lmkinfo.landmarks[i];
-      if (lmks[i/2][i%2] <= 0){
-        data_valid = false;
-      }
-    }
-    if (!data_valid) {
-      GST_WARNING_OBJECT(nvinfer, "Get incorrect face landmarks contain non-positive value. Skip this frame.");
-      continue;
-    }
+  
     int row = sizeof(lmks) / sizeof(lmks[0]);
     cv::Mat dst(row ,2, CV_32FC1, lmks);
     memcpy(dst.data, lmks, 2 * row * sizeof(float));
@@ -2135,10 +2134,10 @@ gst_nvinfer_process_objects (GstNvInfer * nvinfer, GstBuffer * inbuf,
           if(user_meta->base_meta.meta_type == NVDS_USER_OBJECT_META_EXAMPLE){
             LandmarkInfo info;
             for (unsigned int i=0; i < 10; i++) {
-              if (user_meta_data[i]) {
+              // if (user_meta_data[i]) {
                 // landmarks[i] = (float)user_meta_data[i];
                 info.landmarks[i] = (float)user_meta_data[i];
-              }
+              // }
             }
             info.track_id = object_meta->object_id;
             info.frame_id = frame_num;
